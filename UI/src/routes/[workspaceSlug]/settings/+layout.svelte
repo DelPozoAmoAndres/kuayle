@@ -17,7 +17,8 @@
 		CircleDot,
 		ChevronDown,
 		Menu,
-		RefreshCw
+		RefreshCw,
+		GitBranch
 	} from 'lucide-svelte';
 	import { GithubLogoIcon } from 'phosphor-svelte';
 	import type { Snippet } from 'svelte';
@@ -97,6 +98,7 @@
 				{ label: m['settings.nav.labels'](), href: `/${slug}/settings/labels`, icon: Tag },
 				{ label: m['settings.nav.webhooks'](), href: `/${slug}/settings/webhooks`, icon: Webhook },
 				{ label: m['settings.nav.github'](), href: `/${slug}/settings/github`, icon: GithubLogoIcon },
+				{ label: 'Gitea', href: `/${slug}/settings/gitea`, icon: GitBranch },
 				{ label: m['settings.nav.templates'](), href: `/${slug}/settings/templates`, icon: FileText },
 				{ label: m['settings.nav.ai'](), href: `/${slug}/settings/ai`, icon: Sparkles },
 				...(canUseDevMachines ? [{ label: m['settings.nav.dev_machines'](), href: `/${slug}/settings/dev-machines`, icon: SlidersHorizontal }] : [])

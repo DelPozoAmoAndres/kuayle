@@ -51,6 +51,10 @@ type Config struct {
 	// Global GitHub App (SaaS mode — shared across all workspaces)
 	GitHubApp GitHubAppConfig
 
+	// Gitea integration
+	GiteaEnabled    bool   `envconfig:"GITEA_ENABLED" default:"false"`
+	GiteaDefaultURL string `envconfig:"GITEA_DEFAULT_URL"`
+
 	// Dev machine configuration
 	DevMachine DevMachineConfig
 }

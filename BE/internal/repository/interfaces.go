@@ -240,3 +240,34 @@ type IssueTemplateRepo interface {
 	Delete(ctx context.Context, id uuid.UUID) error
 	ListDueForRecurrence(ctx context.Context) ([]domain.IssueTemplate, error)
 }
+
+type GiteaRepo interface {
+	CreateInstance(ctx context.Context, inst *domain.GiteaInstance) error
+	GetInstanceByWorkspace(ctx context.Context, workspaceID uuid.UUID) (*domain.GiteaInstance, error)
+	UpdateInstanceToken(ctx context.Context, id uuid.UUID, accessToken string) error
+	DeleteInstance(ctx context.Context, workspaceID uuid.UUID) error
+	ListInstances(ctx context.Context) ([]domain.GiteaInstance, error)
+
+	CreateRepo(ctx context.Context, repo *domain.GiteaRepoModel) error
+	ListReposByWorkspace(ctx context.Context, workspaceID uuid.UUID) ([]domain.GiteaRepoModel, error)
+	GetRepoByGiteaID(ctx context.Context, workspaceID uuid.UUID, giteaRepoID int64) (*domain.GiteaRepoModel, error)
+	DeleteRepo(ctx context.Context, id uuid.UUID) error
+
+	UpsertPullRequest(ctx context.Context, pr *domain.GiteaPullRequest) error
+	ListPRsWithRepoByIssue(ctx context.Context, issueID uuid.UUID) ([]GiteaPRWithRepo, error)
+
+	UpsertBranch(ctx context.Context, b *domain.GiteaBranch) error
+	ListBranchesWithRepoByIssue(ctx context.Context, issueID uuid.UUID) ([]GiteaBranchWithRepo, error)
+
+	UpsertCommit(ctx context.Context, c *domain.GiteaCommit) error
+	ListCommitsWithRepoByIssue(ctx context.Context, issueID uuid.UUID) ([]GiteaCommitWithRepo, error)
+
+	UpsertAutoTransition(ctx context.Context, t *domain.GiteaAutoTransition) error
+	ListAutoTransitions(ctx context.Context, workspaceID uuid.UUID) ([]domain.GiteaAutoTransition, error)
+	GetAutoTransitionByEvent(ctx context.Context, workspaceID uuid.UUID, event string) (*domain.GiteaAutoTransition, error)
+
+	CreateOAuthConfig(ctx context.Context, cfg *domain.GiteaOAuthConfig) error
+	GetOAuthConfigByWorkspace(ctx context.Context, workspaceID uuid.UUID) (*domain.GiteaOAuthConfig, error)
+	GetOAuthConfigByInstanceURL(ctx context.Context, instanceURL string) (*domain.GiteaOAuthConfig, error)
+	DeleteOAuthConfig(ctx context.Context, workspaceID uuid.UUID) error
+}

@@ -176,6 +176,14 @@ func main() {
 	)
 	githubH := handler.NewGitHubHandler(githubSvc)
 
+	// Gitea integration
+	giteaRepo := repository.NewGiteaRepository(db)
+	giteaSvc := service.NewGiteaService(
+		giteaRepo, issueRepo, teamRepo, teamStatusRepo, historyRepo,
+		crypto.DeriveKey(cfg.JWTSecret+":gitea"), hub, cfg.FrontendURL,
+	)
+	giteaH := handler.NewGiteaHandler(giteaSvc)
+
 	// Background: clean up expired refresh tokens every hour
 	go func() {
 		ticker := time.NewTicker(1 * time.Hour)
@@ -363,6 +371,21 @@ func main() {
 	ws.PATCH("/github/auto-transitions", githubH.UpdateAutoTransitions, mw.RequirePermission("workspace:manage"))
 	ws.GET("/issues/:identifier/github", githubH.IssueGitHubActivity)
 	ws.GET("/github/issue-links", githubH.AgentIssueLinks)
+
+	// Gitea integration (public webhook endpoint)
+	e.POST("/api/gitea/webhook", giteaH.HandleWebhook)
+
+	// Gitea integration (workspace-scoped)
+	ws.GET("/gitea/status", giteaH.Status)
+	ws.POST("/gitea/connect", giteaH.Connect, mw.RequirePermission("workspace:manage"))
+	ws.DELETE("/gitea/disconnect", giteaH.Disconnect, mw.RequirePermission("workspace:manage"))
+	ws.GET("/gitea/repos", giteaH.ListRepos, mw.RequirePermission("workspace:manage"))
+	ws.POST("/gitea/repos", giteaH.LinkRepos, mw.RequirePermission("workspace:manage"))
+	ws.DELETE("/gitea/repos/:id", giteaH.UnlinkRepo, mw.RequirePermission("workspace:manage"))
+	ws.GET("/gitea/auto-transitions", giteaH.ListAutoTransitions)
+	ws.PATCH("/gitea/auto-transitions", giteaH.UpdateAutoTransitions, mw.RequirePermission("workspace:manage"))
+	ws.GET("/issues/:identifier/gitea", giteaH.IssueGiteaActivity)
+	ws.GET("/gitea/issue-links", giteaH.AgentIssueLinks)
 
 	// Dev Machines — guarded by demo-mode restriction when active
 	dm := ws.Group("", mw.DevMachineDemoGuard(cfg.DemoDevMachineAllowed))
