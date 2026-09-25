@@ -10,9 +10,6 @@ services:
       - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-    networks:
-      - default
-      - machine-control
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kuayle} -d ${POSTGRES_DB:-kuayle}"]
       interval: 10s
@@ -33,8 +30,9 @@ services:
       start_period: 5s
 
   backend:
-    profiles: ["app"]
-    build: ./BE
+    build:
+      context: .
+      dockerfile: Dockerfile
     ports:
       - "8080:8080"
     depends_on:
@@ -43,7 +41,6 @@ services:
       redis:
         condition: service_healthy
     volumes:
-      - ./BE:/app
       - uploads:/app/uploads
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-kuayle}:${POSTGRES_PASSWORD:-kuayle}@postgres:5432/${POSTGRES_DB:-kuayle}?sslmode=disable
@@ -53,25 +50,6 @@ services:
       ENVIRONMENT: ${ENVIRONMENT:-development}
       SYSADMINS: ${SYSADMINS:-a0000000-0000-0000-0000-000000000001}
       PUBLIC_DEMO_MODE: ${PUBLIC_DEMO_MODE:-true}
-      DEV_MACHINES_ENABLED: ${DEV_MACHINES_ENABLED:-true}
-      DEV_MACHINE_DOMAIN: ${DEV_MACHINE_DOMAIN:-machines.localhost}
-      DEV_MACHINE_ENCRYPTION_KEY: ${DEV_MACHINE_ENCRYPTION_KEY:-local_dev_machine_encryption_key_32_chars_minimum}
-      DEV_MACHINE_INGEST_URL: ${DEV_MACHINE_INGEST_URL:-https://kuayle.localhost/api/dev-machine-ingest}
-      DEV_MACHINE_SESSION_TTL_MINUTES: ${DEV_MACHINE_SESSION_TTL_MINUTES:-480}
-      DEV_MACHINE_ACCESS_TICKET_TTL_SECONDS: ${DEV_MACHINE_ACCESS_TICKET_TTL_SECONDS:-60}
-      DEV_MACHINE_GATEWAY_CONTAINER: ${DEV_MACHINE_GATEWAY_CONTAINER:-kuayle-dev-machine-gateway}
-      DEV_MACHINE_IDE_IMAGE: ${DEV_MACHINE_IDE_IMAGE:-kuayle/dev-machine-ide:dev}
-      DEV_MACHINE_BROWSER_IMAGE: ${DEV_MACHINE_BROWSER_IMAGE:-kuayle/dev-machine-browser:dev}
-      DEV_MACHINE_COLLECTOR_IMAGE: ${DEV_MACHINE_COLLECTOR_IMAGE:-kuayle/dev-machine-collector:dev}
-      DEV_MACHINE_EGRESS_IMAGE: ${DEV_MACHINE_EGRESS_IMAGE:-kuayle/dev-machine-egress:dev}
-      DEV_MACHINE_CLAUDE_IMAGE: ${DEV_MACHINE_CLAUDE_IMAGE:-kuayle/dev-machine-agent-claude:dev}
-      DEV_MACHINE_OPENCODE_IMAGE: ${DEV_MACHINE_OPENCODE_IMAGE:-kuayle/dev-machine-agent-opencode:dev}
-      DEV_MACHINE_CODEX_IMAGE: ${DEV_MACHINE_CODEX_IMAGE:-kuayle/dev-machine-agent-codex:dev}
-      # STORAGE_TYPE: s3
-      # S3_ENDPOINT: http://seaweedfs:8333
-      # S3_BUCKET: kuayle-uploads
-      # S3_ACCESS_KEY: admin
-      # S3_SECRET_KEY: admin
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
       interval: 30s
@@ -79,265 +57,6 @@ services:
       retries: 3
       start_period: 15s
 
-  # S3-compatible object storage (uncomment to use S3 storage locally)
-  # seaweedfs:
-  #   image: chrislusf/seaweedfs:latest
-  #   restart: unless-stopped
-  #   command: "server -s3 -dir=/data -s3.port=8333 -master.dir=/data/master -volume.dir.idx=/data/volume"
-  #   ports:
-  #     - "127.0.0.1:8333:8333"
-  #     - "127.0.0.1:9333:9333"
-  #   volumes:
-  #     - seaweedfs:/data
-
-  frontend:
-    profiles: ["app"]
-    build:
-      context: ./UI
-      args:
-        PUBLIC_DEMO_MODE: ${PUBLIC_DEMO_MODE:-true}
-        PUBLIC_DEMO_USERS: ${PUBLIC_DEMO_USERS:-}
-    ports:
-      - "5173:5173"
-    depends_on:
-      backend:
-        condition: service_healthy
-    volumes:
-      - ./UI:/app
-      - /app/node_modules
-    environment:
-      PUBLIC_DEMO_MODE: ${PUBLIC_DEMO_MODE:-true}
-      PUBLIC_DEMO_USERS: ${PUBLIC_DEMO_USERS:-}
-
-  machine-gateway-db-provision:
-    profiles: ["dev-machines"]
-    image: postgres:17-alpine
-    restart: "no"
-    depends_on:
-      postgres:
-        condition: service_healthy
-    volumes:
-      - ./selfhosting/gateway-role.sql:/etc/kuayle/gateway-role.sql:ro
-    networks:
-      - machine-control
-    environment:
-      PGPASSWORD: ${POSTGRES_PASSWORD:-kuayle}
-      POSTGRES_USER: ${POSTGRES_USER:-kuayle}
-      POSTGRES_DB: ${POSTGRES_DB:-kuayle}
-      GATEWAY_DB_USER: ${DEV_MACHINE_GATEWAY_DB_USER:-kuayle_gateway_dev}
-      GATEWAY_DB_PASSWORD: ${DEV_MACHINE_GATEWAY_DB_PASSWORD:-local_dev_gateway_password_do_not_use_prod}
-      DEV_MACHINES_ENABLED: ${DEV_MACHINES_ENABLED:-true}
-    command:
-      - sh
-      - -ec
-      - |
-        test "$$DEV_MACHINES_ENABLED" = true || { echo "DEV_MACHINES_ENABLED must be true for local Dev Machines" >&2; exit 1; }
-        test -n "$$GATEWAY_DB_PASSWORD" || { echo "DEV_MACHINE_GATEWAY_DB_PASSWORD is required" >&2; exit 1; }
-        migrated=$$(psql --host postgres --username "$$POSTGRES_USER" --dbname "$$POSTGRES_DB" --tuples-only --no-align --command "SELECT to_regclass('public.dev_machines') IS NOT NULL")
-        test "$$migrated" = t || { echo "Dev Machine migration tables are missing; run make reset-dev or make migrate-up before dev-start-services" >&2; exit 1; }
-        exec psql --host postgres --username "$$POSTGRES_USER" --dbname "$$POSTGRES_DB" \
-          --file=/etc/kuayle/gateway-role.sql
-
-  machine-gateway:
-    profiles: ["dev-machines"]
-    container_name: ${DEV_MACHINE_GATEWAY_CONTAINER:-kuayle-dev-machine-gateway}
-    build:
-      context: ./BE
-      dockerfile: Dockerfile.machine-gateway
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-      machine-gateway-db-provision:
-        condition: service_completed_successfully
-    read_only: true
-    tmpfs:
-      - /tmp:size=32m,noexec,nosuid
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    networks:
-      - machine-control
-    environment:
-      DEV_MACHINE_GATEWAY_DATABASE_URL: ${DEV_MACHINE_GATEWAY_DATABASE_URL:-postgres://${DEV_MACHINE_GATEWAY_DB_USER:-kuayle_gateway_dev}:${DEV_MACHINE_GATEWAY_DB_PASSWORD:-local_dev_gateway_password_do_not_use_prod}@postgres:5432/${POSTGRES_DB:-kuayle}?sslmode=disable}
-      ENVIRONMENT: ${ENVIRONMENT:-development}
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
-      SYSADMINS: ${SYSADMINS:-a0000000-0000-0000-0000-000000000001}
-      PUBLIC_DEMO_MODE: ${PUBLIC_DEMO_MODE:-true}
-      DEV_MACHINES_ENABLED: ${DEV_MACHINES_ENABLED:-true}
-      DEV_MACHINE_DOMAIN: ${DEV_MACHINE_DOMAIN:-machines.localhost}
-      DEV_MACHINE_SESSION_TTL_MINUTES: ${DEV_MACHINE_SESSION_TTL_MINUTES:-480}
-      DEV_MACHINE_ACCESS_TICKET_TTL_SECONDS: ${DEV_MACHINE_ACCESS_TICKET_TTL_SECONDS:-60}
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8090/ready"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 10s
-
-  machine-manager:
-    profiles: ["dev-machines"]
-    build:
-      context: ./BE
-      dockerfile: Dockerfile.machine-manager
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      machine-gateway:
-        condition: service_healthy
-    user: "1000:1000"
-    group_add:
-      - "${DEV_MACHINE_DOCKER_GID:-0}"
-    read_only: true
-    tmpfs:
-      - /tmp:size=64m,noexec,nosuid
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    networks:
-      - default
-      - machine-control
-    environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-kuayle}:${POSTGRES_PASSWORD:-kuayle}@postgres:5432/${POSTGRES_DB:-kuayle}?sslmode=disable
-      REDIS_URL: redis://redis:6379
-      JWT_SECRET: ${JWT_SECRET:-local_dev_jwt_secret_32_chars_minimum_do_not_use_prod}
-      ENVIRONMENT: ${ENVIRONMENT:-development}
-      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:5173}
-      SYSADMINS: ${SYSADMINS:-a0000000-0000-0000-0000-000000000001}
-      PUBLIC_DEMO_MODE: ${PUBLIC_DEMO_MODE:-true}
-      DEV_MACHINES_ENABLED: ${DEV_MACHINES_ENABLED:-true}
-      DEV_MACHINE_DOMAIN: ${DEV_MACHINE_DOMAIN:-machines.localhost}
-      DEV_MACHINE_ENCRYPTION_KEY: ${DEV_MACHINE_ENCRYPTION_KEY:-local_dev_machine_encryption_key_32_chars_minimum}
-      DEV_MACHINE_INGEST_URL: ${DEV_MACHINE_INGEST_URL:-https://kuayle.localhost/api/dev-machine-ingest}
-      DEV_MACHINE_GATEWAY_CONTAINER: ${DEV_MACHINE_GATEWAY_CONTAINER:-kuayle-dev-machine-gateway}
-      DEV_MACHINE_PULL_IMAGES: ${DEV_MACHINE_PULL_IMAGES:-false}
-      DEV_MACHINE_EGRESS_ALLOWLIST: ${DEV_MACHINE_EGRESS_ALLOWLIST:-}
-      DEV_MACHINE_EGRESS_DENYLIST: ${DEV_MACHINE_EGRESS_DENYLIST:-}
-      DEV_MACHINE_SESSION_TTL_MINUTES: ${DEV_MACHINE_SESSION_TTL_MINUTES:-480}
-      DEV_MACHINE_ACCESS_TICKET_TTL_SECONDS: ${DEV_MACHINE_ACCESS_TICKET_TTL_SECONDS:-60}
-      DEV_MACHINE_SECCOMP_PROFILE: ${DEV_MACHINE_SECCOMP_PROFILE:-}
-      DEV_MACHINE_APPARMOR_PROFILE: ${DEV_MACHINE_APPARMOR_PROFILE:-}
-      DEV_MACHINE_DOCKER_HOST: ${DEV_MACHINE_DOCKER_HOST:-unix:///var/run/docker.sock}
-      DEV_MACHINE_IDE_IMAGE: ${DEV_MACHINE_IDE_IMAGE:-kuayle/dev-machine-ide:dev}
-      DEV_MACHINE_BROWSER_IMAGE: ${DEV_MACHINE_BROWSER_IMAGE:-kuayle/dev-machine-browser:dev}
-      DEV_MACHINE_COLLECTOR_IMAGE: ${DEV_MACHINE_COLLECTOR_IMAGE:-kuayle/dev-machine-collector:dev}
-      DEV_MACHINE_EGRESS_IMAGE: ${DEV_MACHINE_EGRESS_IMAGE:-kuayle/dev-machine-egress:dev}
-      DEV_MACHINE_CLAUDE_IMAGE: ${DEV_MACHINE_CLAUDE_IMAGE:-kuayle/dev-machine-agent-claude:dev}
-      DEV_MACHINE_OPENCODE_IMAGE: ${DEV_MACHINE_OPENCODE_IMAGE:-kuayle/dev-machine-agent-opencode:dev}
-      DEV_MACHINE_CODEX_IMAGE: ${DEV_MACHINE_CODEX_IMAGE:-kuayle/dev-machine-agent-codex:dev}
-      GITHUB_APP_ID: ${GITHUB_APP_ID:-0}
-      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
-      GITHUB_APP_WEBHOOK_SECRET: ${GITHUB_APP_WEBHOOK_SECRET:-}
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8092/ready"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 20s
-
-  machine-proxy:
-    profiles: ["dev-machines"]
-    image: caddy:2-alpine
-    container_name: kuayle-dev-machine-proxy
-    restart: unless-stopped
-    depends_on:
-      machine-gateway:
-        condition: service_healthy
-    ports:
-      - "127.0.0.1:80:80"
-      - "127.0.0.1:443:443"
-    volumes:
-      - ./Caddyfile.dev:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    environment:
-      DEV_MACHINE_DOMAIN: ${DEV_MACHINE_DOMAIN:-machines.localhost}
-    networks:
-      - default
-      - machine-control
-    healthcheck:
-      test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
-
-  dev-machine-ide:
-    profiles: ["dev-machine-images"]
-    image: ${DEV_MACHINE_IDE_IMAGE:-kuayle/dev-machine-ide:dev}
-    build:
-      context: ./devmachine
-      dockerfile: ide/Dockerfile
-    entrypoint: ["/bin/true"]
-
-  dev-machine-browser:
-    profiles: ["dev-machine-images"]
-    image: ${DEV_MACHINE_BROWSER_IMAGE:-kuayle/dev-machine-browser:dev}
-    build:
-      context: ./devmachine
-      dockerfile: browser/Dockerfile
-    entrypoint: ["/bin/true"]
-
-  dev-machine-collector:
-    profiles: ["dev-machine-images"]
-    image: ${DEV_MACHINE_COLLECTOR_IMAGE:-kuayle/dev-machine-collector:dev}
-    build:
-      context: ./devmachine
-      dockerfile: collector/Dockerfile
-    entrypoint: ["/bin/true"]
-
-  dev-machine-egress:
-    profiles: ["dev-machine-images"]
-    image: ${DEV_MACHINE_EGRESS_IMAGE:-kuayle/dev-machine-egress:dev}
-    build:
-      context: ./devmachine
-      dockerfile: egress/Dockerfile
-    entrypoint: ["/bin/true"]
-
-  dev-machine-agent-claude:
-    profiles: ["dev-machine-images"]
-    image: ${DEV_MACHINE_CLAUDE_IMAGE:-kuayle/dev-machine-agent-claude:dev}
-    build:
-      context: ./devmachine
-      dockerfile: agent/Dockerfile
-      args:
-        PROVIDER: claude-code
-    entrypoint: ["/bin/true"]
-
-  dev-machine-agent-opencode:
-    profiles: ["dev-machine-images"]
-    image: ${DEV_MACHINE_OPENCODE_IMAGE:-kuayle/dev-machine-agent-opencode:dev}
-    build:
-      context: ./devmachine
-      dockerfile: agent/Dockerfile
-      args:
-        PROVIDER: opencode
-    entrypoint: ["/bin/true"]
-
-  dev-machine-agent-codex:
-    profiles: ["dev-machine-images"]
-    image: ${DEV_MACHINE_CODEX_IMAGE:-kuayle/dev-machine-agent-codex:dev}
-    build:
-      context: ./devmachine
-      dockerfile: agent/Dockerfile
-      args:
-        PROVIDER: codex
-    entrypoint: ["/bin/true"]
-
 volumes:
   pgdata:
   uploads:
-  caddy_data:
-  caddy_config:
-  # seaweedfs:
-
-networks:
-  machine-control:
-    internal: true
