@@ -24,6 +24,7 @@ type IssueService struct {
 	historyRepo    repository.IssueHistoryRepo
 	hub            *realtime.Hub
 	notifSvc       *NotificationService
+	giteaSvc       *GiteaService
 }
 
 const issueUpdateNotificationWindow = 5 * time.Minute
@@ -65,6 +66,11 @@ func NewIssueService(issueRepo repository.IssueRepo, teamRepo repository.TeamRep
 		svc.projectRepo = projectRepo[0]
 	}
 	return svc
+}
+
+// SetGiteaService sets the GiteaService dependency for issue-to-Gitea syncing.
+func (s *IssueService) SetGiteaService(giteaSvc *GiteaService) {
+	s.giteaSvc = giteaSvc
 }
 
 func (s *IssueService) Create(ctx context.Context, workspaceID, creatorID uuid.UUID, req dto.CreateIssueRequest) (*domain.Issue, error) {
@@ -225,6 +231,13 @@ func (s *IssueService) Create(ctx context.Context, workspaceID, creatorID uuid.U
 
 	// Notify assignees (except the creator)
 	s.notifyAssignees(ctx, issue, creatorID, workspaceID)
+
+	// Sync to Gitea if the issue is linked to a Gitea-integrated workspace
+	if s.giteaSvc != nil {
+		if err := s.giteaSvc.SyncIssueToGitea(ctx, issue); err != nil {
+			log.WithError(err).WithField("issue_id", issue.ID).Warn("failed to sync issue to Gitea")
+		}
+	}
 
 	return issue, nil
 }
@@ -505,11 +518,14 @@ func (s *IssueService) Update(ctx context.Context, workspaceID, userID uuid.UUID
 		changes.newMentions = newMentionedUserIDs(oldDescription, *req.Description)
 	}
 	statusChanged := false
+	oldStatusWasDone := false
 	if req.StatusID != nil {
 		sid, err := uuid.Parse(*req.StatusID)
 		if err == nil {
 			statusChanged = issue.StatusID == nil || *issue.StatusID != sid
 			if statusChanged {
+				// Track if we're moving away from "done" status
+				oldStatusWasDone = issue.Status == domain.IssueStatusDone
 				// Look up old and new status names for history
 				var oldName string
 				if issue.StatusID != nil {
@@ -533,6 +549,7 @@ func (s *IssueService) Update(ctx context.Context, workspaceID, userID uuid.UUID
 			}
 		}
 	} else if req.Status != nil && *req.Status != string(issue.Status) {
+		oldStatusWasDone = issue.Status == domain.IssueStatusDone
 		old := string(issue.Status)
 		issue.Status = domain.IssueStatus(*req.Status)
 		statusChanged = true
@@ -787,6 +804,30 @@ func (s *IssueService) Update(ctx context.Context, workspaceID, userID uuid.UUID
 
 	// Send notifications for field changes
 	s.sendUpdateNotifications(ctx, issue, userID, changes)
+
+	// Sync changes to Gitea
+	if s.giteaSvc != nil {
+		if issue.GiteaIssueIndex != nil || issue.GiteaInstanceID != nil {
+			// Sync title/description updates
+			if changes.hasRegularChanges() {
+				if err := s.giteaSvc.SyncIssueToGitea(ctx, issue); err != nil {
+					log.WithError(err).WithField("issue_id", issue.ID).Warn("failed to sync issue update to Gitea")
+				}
+			}
+			// Sync close/reopen status changes
+			if statusChanged {
+				if issue.Status == domain.IssueStatusDone {
+					if err := s.giteaSvc.SyncIssueCloseToGitea(ctx, issue); err != nil {
+						log.WithError(err).WithField("issue_id", issue.ID).Warn("failed to sync issue close to Gitea")
+					}
+				} else if oldStatusWasDone {
+					if err := s.giteaSvc.SyncIssueReopenToGitea(ctx, issue); err != nil {
+						log.WithError(err).WithField("issue_id", issue.ID).Warn("failed to sync issue reopen to Gitea")
+					}
+				}
+			}
+		}
+	}
 
 	return issue, nil
 }

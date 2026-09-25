@@ -139,6 +139,14 @@ func (m *mockIssueRepo) BeginTx(ctx context.Context) (*sqlx.Tx, error) {
 	return args.Get(0).(*sqlx.Tx), args.Error(1)
 }
 
+func (m *mockIssueRepo) GetByGiteaIssueIndex(ctx context.Context, workspaceID uuid.UUID, giteaRepoID uuid.UUID, issueIndex int64) (*domain.Issue, error) {
+	args := m.Called(ctx, workspaceID, giteaRepoID, issueIndex)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.Issue), args.Error(1)
+}
+
 type mockTeamRepo struct {
 	mock.Mock
 }

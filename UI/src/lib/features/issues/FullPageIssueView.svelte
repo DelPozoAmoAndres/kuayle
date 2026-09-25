@@ -1409,6 +1409,20 @@
 							/>
 						</div>
 
+						<!-- Gitea sync row -->
+						{#if issue.gitea_issue_index}
+							<div class="flex items-center gap-3 rounded-md px-2 py-1.5 hover:bg-[var(--color-bg-hover)] transition-colors">
+								<span class="w-20 shrink-0 text-xs text-[var(--color-text-tertiary)]">Gitea</span>
+								<span class="flex items-center gap-1.5 text-sm text-[var(--color-text-secondary)]">
+									<span class="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-400">
+										<span class="h-1.5 w-1.5 rounded-full bg-emerald-400"></span>
+										Synced
+									</span>
+									<span class="text-xs text-[var(--color-text-tertiary)]">#{issue.gitea_issue_index}</span>
+								</span>
+							</div>
+						{/if}
+
 					</div>
 				{/if}
 			</div>

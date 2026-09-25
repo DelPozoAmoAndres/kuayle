@@ -152,6 +152,80 @@ func (c *Client) doPost(urlPath string, payload []byte, result interface{}) erro
 	return json.NewDecoder(resp.Body).Decode(result)
 }
 
+// CreateIssue opens a new issue in a repository.
+func (c *Client) CreateIssue(owner, repo, title, body string) (*Issue, error) {
+	payload, err := json.Marshal(map[string]any{
+		"title": title,
+		"body":  body,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var issue Issue
+	if err := c.doPost(fmt.Sprintf("/api/v1/repos/%s/%s/issues", owner, repo), payload, &issue); err != nil {
+		return nil, err
+	}
+	return &issue, nil
+}
+
+// EditIssue updates an existing issue's title, body, and/or state.
+func (c *Client) EditIssue(owner, repo string, issueIndex int, title, body, state string) (*Issue, error) {
+	fields := map[string]any{}
+	if title != "" {
+		fields["title"] = title
+	}
+	if body != "" {
+		fields["body"] = body
+	}
+	if state != "" {
+		fields["state"] = state
+	}
+	payload, err := json.Marshal(fields)
+	if err != nil {
+		return nil, err
+	}
+	var issue Issue
+	if err := c.doPatch(fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d", owner, repo, issueIndex), payload, &issue); err != nil {
+		return nil, err
+	}
+	return &issue, nil
+}
+
+// CloseIssue closes an issue by setting its state to "closed".
+func (c *Client) CloseIssue(owner, repo string, issueIndex int) (*Issue, error) {
+	return c.EditIssue(owner, repo, issueIndex, "", "", "closed")
+}
+
+// ReopenIssue reopens an issue by setting its state to "open".
+func (c *Client) ReopenIssue(owner, repo string, issueIndex int) (*Issue, error) {
+	return c.EditIssue(owner, repo, issueIndex, "", "", "open")
+}
+
+// doPatch is a helper for authenticated PATCH requests.
+func (c *Client) doPatch(urlPath string, payload []byte, result interface{}) error {
+	fullURL := c.baseURL + urlPath
+	req, err := http.NewRequest("PATCH", fullURL, strings.NewReader(string(payload)))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "token "+c.token)
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("Gitea API error %d: %s", resp.StatusCode, body)
+	}
+
+	return json.NewDecoder(resp.Body).Decode(result)
+}
+
 // --- Types ---
 
 // User represents a Gitea user.
@@ -214,4 +288,17 @@ type CommitData struct {
 type CommitAuthor struct {
 	Name string    `json:"name"`
 	Date time.Time `json:"date"`
+}
+
+// Issue represents a Gitea issue.
+type Issue struct {
+	ID        int64      `json:"id"`
+	Index     int64      `json:"number"`
+	Title     string     `json:"title"`
+	Body      string     `json:"body"`
+	State     string     `json:"state"`
+	HTMLURL   string     `json:"html_url"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+	ClosedAt  *time.Time `json:"closed_at"`
 }

@@ -23,14 +23,15 @@ func NewIssueRepository(db *sqlx.DB) *IssueRepository {
 
 func (r *IssueRepository) Create(ctx context.Context, tx *sqlx.Tx, issue *domain.Issue) error {
 	query := `
-		INSERT INTO issues (id, workspace_id, team_id, project_id, cycle_id, number, identifier_text, title, description, status, status_id, priority, creator_id, assignee_id, parent_id, due_date, sort_order, triaged)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+		INSERT INTO issues (id, workspace_id, team_id, project_id, cycle_id, number, identifier_text, title, description, status, status_id, priority, creator_id, assignee_id, parent_id, due_date, sort_order, triaged, gitea_issue_index, gitea_instance_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 		RETURNING created_at, updated_at`
 	return tx.QueryRowContext(ctx, query,
 		issue.ID, issue.WorkspaceID, issue.TeamID, issue.ProjectID, issue.CycleID,
 		issue.Number, issue.Identifier, issue.Title, issue.Description,
 		issue.Status, issue.StatusID, issue.Priority, issue.CreatorID, issue.AssigneeID,
 		issue.ParentID, issue.DueDate, issue.SortOrder, issue.Triaged,
+		issue.GiteaIssueIndex, issue.GiteaInstanceID,
 	).Scan(&issue.CreatedAt, &issue.UpdatedAt)
 }
 
@@ -66,6 +67,18 @@ func (r *IssueRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Is
 func (r *IssueRepository) GetByIdentifier(ctx context.Context, workspaceID uuid.UUID, identifier string) (*domain.Issue, error) {
 	var issue domain.Issue
 	err := r.db.GetContext(ctx, &issue, `SELECT * FROM issues WHERE workspace_id = $1 AND identifier_text = $2`, workspaceID, identifier)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return &issue, err
+}
+
+func (r *IssueRepository) GetByGiteaIssueIndex(ctx context.Context, workspaceID uuid.UUID, instanceID uuid.UUID, issueIndex int64) (*domain.Issue, error) {
+	var issue domain.Issue
+	err := r.db.GetContext(ctx, &issue,
+		`SELECT * FROM issues WHERE workspace_id = $1 AND gitea_instance_id = $2 AND gitea_issue_index = $3`,
+		workspaceID, instanceID, issueIndex,
+	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -338,14 +351,16 @@ func (r *IssueRepository) Update(ctx context.Context, issue *domain.Issue) error
 			title = $1, description = $2, status = $3, priority = $4,
 			assignee_id = $5, project_id = $6, cycle_id = $7, parent_id = $8,
 			due_date = $9, sort_order = $10, triaged = $11,
-			status_id = $12, updated_at = NOW()
-		WHERE id = $13
+			status_id = $12, gitea_issue_index = $13, gitea_instance_id = $14,
+			updated_at = NOW()
+		WHERE id = $15
 		RETURNING updated_at`
 	return r.db.QueryRowContext(ctx, query,
 		issue.Title, issue.Description, issue.Status, issue.Priority,
 		issue.AssigneeID, issue.ProjectID, issue.CycleID, issue.ParentID,
 		issue.DueDate, issue.SortOrder, issue.Triaged,
-		issue.StatusID, issue.ID,
+		issue.StatusID, issue.GiteaIssueIndex, issue.GiteaInstanceID,
+		issue.ID,
 	).Scan(&issue.UpdatedAt)
 }
 

@@ -42,6 +42,8 @@ export interface Issue {
 	relation_counts?: IssueRelationCounts;
 	relation_summary?: IssueRelationSummary;
 	is_subscribed?: boolean;
+	gitea_issue_index?: number | null;
+	gitea_instance_id?: string | null;
 	created_at: string;
 	updated_at: string;
 }

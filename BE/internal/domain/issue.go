@@ -50,6 +50,8 @@ type Issue struct {
 	CompletedAt *time.Time    `json:"completed_at" db:"completed_at"`
 	CancelledAt *time.Time    `json:"cancelled_at" db:"cancelled_at"`
 	TriagedAt   *time.Time    `json:"triaged_at" db:"triaged_at"`
+	GiteaIssueIndex  *int64     `json:"gitea_issue_index" db:"gitea_issue_index"`
+	GiteaInstanceID  *uuid.UUID `json:"gitea_instance_id" db:"gitea_instance_id"`
 	CreatedAt   time.Time     `json:"created_at" db:"created_at"`
 	UpdatedAt   time.Time     `json:"updated_at" db:"updated_at"`
 }

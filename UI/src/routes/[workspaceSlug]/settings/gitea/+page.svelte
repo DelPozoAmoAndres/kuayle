@@ -402,6 +402,32 @@
 				{/if}
 			</div>
 
+			<!-- Issue sync status -->
+			<div class="rounded-lg border border-[var(--app-border)] p-4">
+				<div class="flex items-center gap-3">
+					<div class="flex h-8 w-8 items-center justify-center rounded-lg bg-[var(--color-bg-tertiary)]">
+						<GitBranch size={16} class="text-[var(--color-text-secondary)]" />
+					</div>
+					<div class="flex-1">
+						<h3 class="text-sm font-medium text-[var(--color-text-primary)]">Issue Sync</h3>
+						<p class="text-xs text-[var(--color-text-tertiary)]">Two-way synchronization between Kuayle and Gitea issues.</p>
+					</div>
+					{#if status.synced_issues_count !== undefined}
+						<Badge variant="outline" class="text-xs">{status.synced_issues_count} synced</Badge>
+					{/if}
+				</div>
+				{#if status.sync_errors && status.sync_errors.length > 0}
+					<div class="mt-3 rounded-md bg-red-500/10 px-3 py-2">
+						<p class="text-xs font-medium text-red-400">Sync errors:</p>
+						<ul class="mt-1 space-y-0.5">
+							{#each status.sync_errors as err}
+								<li class="text-xs text-red-400/80">{err}</li>
+							{/each}
+						</ul>
+					</div>
+				{/if}
+			</div>
+
 			<!-- Auto-transitions -->
 			{#if transitions.length > 0}
 				<div>

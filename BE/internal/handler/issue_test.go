@@ -166,6 +166,10 @@ func (r *testIssueRepo) BeginTx(_ context.Context) (*sqlx.Tx, error) {
 	return nil, nil
 }
 
+func (r *testIssueRepo) GetByGiteaIssueIndex(_ context.Context, _ uuid.UUID, _ uuid.UUID, _ int64) (*domain.Issue, error) {
+	return nil, nil
+}
+
 type testTeamRepo struct {
 	teams map[uuid.UUID]*domain.Team
 }

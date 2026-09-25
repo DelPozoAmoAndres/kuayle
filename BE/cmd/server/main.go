@@ -184,6 +184,9 @@ func main() {
 	)
 	giteaH := handler.NewGiteaHandler(giteaSvc)
 
+	// Wire Gitea sync into IssueService (avoids circular init by using setter)
+	issueSvc.SetGiteaService(giteaSvc)
+
 	// Background: clean up expired refresh tokens every hour
 	go func() {
 		ticker := time.NewTicker(1 * time.Hour)

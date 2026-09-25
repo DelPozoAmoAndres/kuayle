@@ -25,6 +25,8 @@ export interface GiteaStatus {
 	connected: boolean;
 	instance?: GiteaInstance;
 	repos: GiteaRepo[];
+	synced_issues_count?: number;
+	sync_errors?: string[];
 }
 
 export interface GiteaPullRequest {

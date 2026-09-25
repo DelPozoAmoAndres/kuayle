@@ -64,6 +64,7 @@ type IssueRepo interface {
 	NextNumber(ctx context.Context, tx *sqlx.Tx, teamID *uuid.UUID) (int, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.Issue, error)
 	GetByIdentifier(ctx context.Context, workspaceID uuid.UUID, identifier string) (*domain.Issue, error)
+	GetByGiteaIssueIndex(ctx context.Context, workspaceID uuid.UUID, instanceID uuid.UUID, issueIndex int64) (*domain.Issue, error)
 	List(ctx context.Context, workspaceID uuid.UUID, params dto.IssueFilterParams) ([]domain.Issue, int, error)
 	Update(ctx context.Context, issue *domain.Issue) error
 	UpdateTeam(ctx context.Context, tx *sqlx.Tx, issueID uuid.UUID, teamID *uuid.UUID, number int, identifier string) error

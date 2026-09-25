@@ -20,6 +20,25 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// contextKey is an unexported type for context keys defined in this package.
+type contextKey string
+
+// syncingFromGiteaKey is the context key used to flag that an update is being
+// initiated from a Gitea webhook, preventing infinite sync loops back to Gitea.
+const syncingFromGiteaKey contextKey = "syncing_from_gitea"
+
+// SyncingFromGitea returns a new context flagged as originating from a Gitea
+// webhook, so that downstream code can skip syncing back to Gitea.
+func SyncingFromGitea(ctx context.Context) context.Context {
+	return context.WithValue(ctx, syncingFromGiteaKey, true)
+}
+
+// IsSyncingFromGitea checks whether the context was flagged by SyncingFromGitea.
+func IsSyncingFromGitea(ctx context.Context) bool {
+	v, _ := ctx.Value(syncingFromGiteaKey).(bool)
+	return v
+}
+
 type GiteaService struct {
 	gtRepo         *repository.GiteaRepository
 	issueRepo      repository.IssueRepo
@@ -336,6 +355,8 @@ func (s *GiteaService) HandleWebhookEvent(ctx context.Context, workspaceID uuid.
 		return s.processPullRequestEvent(ctx, workspaceID, payload)
 	case "push":
 		return s.processPushEvent(ctx, workspaceID, payload)
+	case "issues":
+		return s.processIssuesEvent(ctx, workspaceID, payload)
 	default:
 		return nil
 	}
@@ -583,6 +604,379 @@ func (s *GiteaService) processPushEvent(ctx context.Context, workspaceID uuid.UU
 		s.broadcastAppRefresh(workspaceID, "issues")
 	}
 
+	return nil
+}
+
+// --- Issue Webhook Processing ---
+
+// giteaWebhookIssue mirrors the Gitea issues webhook payload.
+type giteaWebhookIssue struct {
+	Action  string `json:"action"`
+	Issue   struct {
+		ID     int64  `json:"id"`
+		Number int64  `json:"number"`
+		Title  string `json:"title"`
+		Body   string `json:"body"`
+		State  string `json:"state"`
+	} `json:"issue"`
+	Repository struct {
+		ID       int64  `json:"id"`
+		FullName string `json:"full_name"`
+	} `json:"repository"`
+	Sender struct {
+		Login string `json:"login"`
+	} `json:"sender"`
+}
+
+func (s *GiteaService) processIssuesEvent(ctx context.Context, workspaceID uuid.UUID, payload []byte) error {
+	var event giteaWebhookIssue
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return fmt.Errorf("unmarshaling issues event: %w", err)
+	}
+
+	repo, err := s.gtRepo.GetRepoByGiteaID(ctx, workspaceID, event.Repository.ID)
+	if err != nil || repo == nil {
+		return nil
+	}
+
+	// Find the Gitea instance to get the instance ID for storing on the issue
+	inst, err := s.gtRepo.GetInstanceByWorkspace(ctx, workspaceID)
+	if err != nil || inst == nil {
+		return nil
+	}
+
+	// Flag context to prevent infinite sync loops
+	ctx = SyncingFromGitea(ctx)
+
+	switch event.Action {
+	case "opened", "created":
+		return s.syncIssueFromGiteaOpen(ctx, workspaceID, inst, repo, event)
+	case "edited":
+		return s.syncIssueFromGiteaEdit(ctx, workspaceID, inst, event)
+	case "closed":
+		return s.syncIssueFromGiteaClose(ctx, workspaceID, inst, event)
+	case "reopened":
+		return s.syncIssueFromGiteaReopen(ctx, workspaceID, inst, event)
+	default:
+		return nil
+	}
+}
+
+func (s *GiteaService) syncIssueFromGiteaOpen(ctx context.Context, workspaceID uuid.UUID, inst *domain.GiteaInstance, repo *domain.GiteaRepoModel, event giteaWebhookIssue) error {
+	// Check if already synced
+	existing, err := s.issueRepo.GetByGiteaIssueIndex(ctx, workspaceID, inst.ID, event.Issue.Number)
+	if err != nil || existing != nil {
+		return nil
+	}
+
+	// Find a team to assign to — prefer the first available team in the workspace
+	teams, err := s.teamRepo.ListByWorkspace(ctx, workspaceID)
+	if err != nil {
+		log.WithError(err).Warn("failed to list teams for workspace")
+	}
+
+	var teamID *uuid.UUID
+	if len(teams) > 0 {
+		teamID = &teams[0].ID
+	}
+
+	tx, err := s.issueRepo.BeginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	number, err := s.issueRepo.NextNumber(ctx, tx, teamID)
+	if err != nil {
+		return err
+	}
+
+	var identifier string
+	if teamID != nil {
+		identifier = fmt.Sprintf("%s-%d", teams[0].Key, number)
+	} else {
+		identifier = fmt.Sprintf("NOTEAM-%d", number)
+	}
+
+	issue := &domain.Issue{
+		ID:               uuid.New(),
+		WorkspaceID:      workspaceID,
+		TeamID:           teamID,
+		Number:           number,
+		Identifier:       identifier,
+		Title:            event.Issue.Title,
+		Description:      &event.Issue.Body,
+		Status:           domain.IssueStatusTodo,
+		CreatorID:        workspaceID, // system-level creator for webhook-synced issues
+		SortOrder:        -float64(number) * 1000,
+		GiteaIssueIndex:  &event.Issue.Number,
+		GiteaInstanceID:  &inst.ID,
+		Triaged:          teamID == nil,
+	}
+
+	// Resolve status_id for the team
+	if teamID != nil {
+		ts, err := s.teamStatusRepo.GetByTeamAndSlug(ctx, *teamID, string(domain.IssueStatusTodo))
+		if err == nil && ts != nil {
+			issue.StatusID = &ts.ID
+		}
+	}
+
+	if err := s.issueRepo.Create(ctx, tx, issue); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	s.broadcastRealtimeEvent(workspaceID, realtime.Event{
+		Type:    "issue.created",
+		Payload: issue,
+	})
+	s.broadcastAppRefresh(workspaceID, "issues")
+	return nil
+}
+
+func (s *GiteaService) syncIssueFromGiteaEdit(ctx context.Context, workspaceID uuid.UUID, inst *domain.GiteaInstance, event giteaWebhookIssue) error {
+	issue, err := s.issueRepo.GetByGiteaIssueIndex(ctx, workspaceID, inst.ID, event.Issue.Number)
+	if err != nil || issue == nil {
+		return nil
+	}
+
+	issue.Title = event.Issue.Title
+	issue.Description = &event.Issue.Body
+
+	if err := s.issueRepo.Update(ctx, issue); err != nil {
+		log.WithError(err).WithField("issue_id", issue.ID).Warn("failed to sync issue edit from Gitea")
+		return nil
+	}
+
+	s.broadcastRealtimeEvent(workspaceID, realtime.Event{
+		Type:    "issue.updated",
+		Payload: issue,
+	})
+	s.broadcastAppRefresh(workspaceID, "issues")
+	return nil
+}
+
+func (s *GiteaService) syncIssueFromGiteaClose(ctx context.Context, workspaceID uuid.UUID, inst *domain.GiteaInstance, event giteaWebhookIssue) error {
+	issue, err := s.issueRepo.GetByGiteaIssueIndex(ctx, workspaceID, inst.ID, event.Issue.Number)
+	if err != nil || issue == nil {
+		return nil
+	}
+
+	issue.Status = domain.IssueStatusDone
+	if issue.TeamID != nil {
+		ts, err := s.teamStatusRepo.GetByTeamAndSlug(ctx, *issue.TeamID, string(domain.IssueStatusDone))
+		if err == nil && ts != nil {
+			issue.StatusID = &ts.ID
+		}
+	}
+
+	if err := s.issueRepo.Update(ctx, issue); err != nil {
+		log.WithError(err).WithField("issue_id", issue.ID).Warn("failed to sync issue close from Gitea")
+		return nil
+	}
+
+	s.broadcastRealtimeEvent(workspaceID, realtime.Event{
+		Type:    "issue.updated",
+		Payload: issue,
+	})
+	s.broadcastAppRefresh(workspaceID, "issues")
+	return nil
+}
+
+func (s *GiteaService) syncIssueFromGiteaReopen(ctx context.Context, workspaceID uuid.UUID, inst *domain.GiteaInstance, event giteaWebhookIssue) error {
+	issue, err := s.issueRepo.GetByGiteaIssueIndex(ctx, workspaceID, inst.ID, event.Issue.Number)
+	if err != nil || issue == nil {
+		return nil
+	}
+
+	issue.Status = domain.IssueStatusTodo
+	if issue.TeamID != nil {
+		ts, err := s.teamStatusRepo.GetByTeamAndSlug(ctx, *issue.TeamID, string(domain.IssueStatusTodo))
+		if err == nil && ts != nil {
+			issue.StatusID = &ts.ID
+		}
+	}
+
+	if err := s.issueRepo.Update(ctx, issue); err != nil {
+		log.WithError(err).WithField("issue_id", issue.ID).Warn("failed to sync issue reopen from Gitea")
+		return nil
+	}
+
+	s.broadcastRealtimeEvent(workspaceID, realtime.Event{
+		Type:    "issue.updated",
+		Payload: issue,
+	})
+	s.broadcastAppRefresh(workspaceID, "issues")
+	return nil
+}
+
+// --- Gitea Sync Helpers ---
+
+// getClientForWorkspace returns a Gitea API client for the given workspace.
+func (s *GiteaService) getClientForWorkspace(ctx context.Context, workspaceID uuid.UUID) (*gt.Client, *domain.GiteaInstance, error) {
+	inst, err := s.gtRepo.GetInstanceByWorkspace(ctx, workspaceID)
+	if err != nil || inst == nil {
+		return nil, nil, fmt.Errorf("Gitea not connected")
+	}
+
+	token, err := s.decryptToken(inst.AccessToken)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	client := gt.NewClient(inst.InstanceURL, token)
+	return client, inst, nil
+}
+
+// getRepoForIssue finds the linked Gitea repo associated with an issue's workspace.
+func (s *GiteaService) getRepoForIssue(ctx context.Context, issue *domain.Issue) (*domain.GiteaRepoModel, *domain.GiteaInstance, error) {
+	if issue.GiteaInstanceID == nil {
+		return nil, nil, fmt.Errorf("issue not linked to a Gitea instance")
+	}
+
+	repos, err := s.gtRepo.ListReposByWorkspace(ctx, issue.WorkspaceID)
+	if err != nil || len(repos) == 0 {
+		return nil, nil, fmt.Errorf("no linked repos found")
+	}
+
+	inst, err := s.gtRepo.GetInstanceByWorkspace(ctx, issue.WorkspaceID)
+	if err != nil || inst == nil {
+		return nil, nil, fmt.Errorf("Gitea not connected")
+	}
+
+	// Return the first active linked repo
+	for _, repo := range repos {
+		if repo.IsActive {
+			return &repo, inst, nil
+		}
+	}
+	return &repos[0], inst, nil
+}
+
+// SyncIssueToGitea creates or updates an issue in Gitea when it is created or
+// updated in Kuayle. This should only be called when NOT processing a Gitea
+// webhook (i.e., when the context is NOT flagged with SyncingFromGitea).
+func (s *GiteaService) SyncIssueToGitea(ctx context.Context, issue *domain.Issue) error {
+	if IsSyncingFromGitea(ctx) {
+		return nil
+	}
+
+	client, _, err := s.getClientForWorkspace(ctx, issue.WorkspaceID)
+	if err != nil {
+		return nil // silently skip if Gitea is not connected
+	}
+
+	// Find the linked repo to use
+	repos, err := s.gtRepo.ListReposByWorkspace(ctx, issue.WorkspaceID)
+	if err != nil || len(repos) == 0 {
+		return nil
+	}
+	repo := repos[0]
+	owner := strings.SplitN(repo.FullName, "/", 2)
+	if len(owner) != 2 {
+		return nil
+	}
+
+	body := ""
+	if issue.Description != nil {
+		body = *issue.Description
+	}
+
+	if issue.GiteaIssueIndex != nil {
+		// Update existing Gitea issue
+		state := ""
+		switch issue.Status {
+		case domain.IssueStatusDone:
+			state = "closed"
+		}
+		giteaIssue, err := client.EditIssue(owner[0], owner[1], int(*issue.GiteaIssueIndex), issue.Title, body, state)
+		if err != nil {
+			log.WithError(err).WithField("issue_id", issue.ID).Warn("failed to update issue in Gitea")
+			return nil
+		}
+		log.WithField("gitea_issue_number", giteaIssue.Index).Info("updated issue in Gitea")
+		return nil
+	}
+
+	// Create new Gitea issue
+	giteaIssue, err := client.CreateIssue(owner[0], owner[1], issue.Title, body)
+	if err != nil {
+		log.WithError(err).WithField("issue_id", issue.ID).Warn("failed to create issue in Gitea")
+		return nil
+	}
+
+	// Store the Gitea issue index and instance ID on the Kuayle issue
+	issue.GiteaIssueIndex = &giteaIssue.Index
+	instID := repos[0].InstanceID
+	issue.GiteaInstanceID = &instID
+	if err := s.issueRepo.Update(ctx, issue); err != nil {
+		log.WithError(err).WithField("issue_id", issue.ID).Warn("failed to store Gitea issue index")
+	}
+
+	log.WithField("gitea_issue_number", giteaIssue.Index).Info("created issue in Gitea")
+	return nil
+}
+
+// SyncIssueCloseToGitea closes an issue in Gitea when it is closed in Kuayle.
+func (s *GiteaService) SyncIssueCloseToGitea(ctx context.Context, issue *domain.Issue) error {
+	if IsSyncingFromGitea(ctx) {
+		return nil
+	}
+	if issue.GiteaIssueIndex == nil {
+		return nil
+	}
+
+	client, _, err := s.getClientForWorkspace(ctx, issue.WorkspaceID)
+	if err != nil {
+		return nil
+	}
+
+	repos, err := s.gtRepo.ListReposByWorkspace(ctx, issue.WorkspaceID)
+	if err != nil || len(repos) == 0 {
+		return nil
+	}
+	repo := repos[0]
+	owner := strings.SplitN(repo.FullName, "/", 2)
+	if len(owner) != 2 {
+		return nil
+	}
+
+	if _, err := client.CloseIssue(owner[0], owner[1], int(*issue.GiteaIssueIndex)); err != nil {
+		log.WithError(err).WithField("issue_id", issue.ID).Warn("failed to close issue in Gitea")
+	}
+	return nil
+}
+
+// SyncIssueReopenToGitea reopens an issue in Gitea when it is reopened in Kuayle.
+func (s *GiteaService) SyncIssueReopenToGitea(ctx context.Context, issue *domain.Issue) error {
+	if IsSyncingFromGitea(ctx) {
+		return nil
+	}
+	if issue.GiteaIssueIndex == nil {
+		return nil
+	}
+
+	client, _, err := s.getClientForWorkspace(ctx, issue.WorkspaceID)
+	if err != nil {
+		return nil
+	}
+
+	repos, err := s.gtRepo.ListReposByWorkspace(ctx, issue.WorkspaceID)
+	if err != nil || len(repos) == 0 {
+		return nil
+	}
+	repo := repos[0]
+	owner := strings.SplitN(repo.FullName, "/", 2)
+	if len(owner) != 2 {
+		return nil
+	}
+
+	if _, err := client.ReopenIssue(owner[0], owner[1], int(*issue.GiteaIssueIndex)); err != nil {
+		log.WithError(err).WithField("issue_id", issue.ID).Warn("failed to reopen issue in Gitea")
+	}
 	return nil
 }
 
