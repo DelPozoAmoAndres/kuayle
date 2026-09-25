@@ -8,7 +8,7 @@ type CreateIssueRequest struct {
 	Status      string   `json:"status" validate:"omitempty,oneof=backlog todo in_progress in_review done cancelled"`
 	StatusID    *string  `json:"status_id" validate:"omitempty,uuid"`
 	Priority    *int     `json:"priority" validate:"omitempty,min=0,max=4"`
-	TeamID      string   `json:"team_id" validate:"required,uuid"`
+	TeamID      *string  `json:"team_id" validate:"omitempty,uuid"`
 	ProjectID   *string  `json:"project_id" validate:"omitempty,uuid"`
 	AssigneeID  *string  `json:"assignee_id" validate:"omitempty,uuid"`
 	AssigneeIDs []string `json:"assignee_ids" validate:"omitempty,dive,uuid"`
@@ -46,6 +46,7 @@ type UpdateIssueRequest struct {
 	Status      *string  `json:"status" validate:"omitempty,oneof=backlog todo in_progress in_review done cancelled"`
 	StatusID    *string  `json:"status_id" validate:"omitempty,uuid"`
 	Priority    *int     `json:"priority" validate:"omitempty,min=0,max=4"`
+	TeamID      *string  `json:"team_id" validate:"omitempty,uuid"`
 	AssigneeID  *string  `json:"assignee_id" validate:"omitempty,uuid"`
 	AssigneeIDs []string `json:"assignee_ids" validate:"omitempty,dive,uuid"`
 	ProjectID   *string  `json:"project_id" validate:"omitempty,uuid"`
@@ -65,7 +66,7 @@ type IssueResponse struct {
 	StatusID        *string                       `json:"status_id,omitempty"`
 	StatusInfo      *StatusInfoResponse           `json:"status_info,omitempty"`
 	Priority        int                           `json:"priority"`
-	TeamID          string                        `json:"team_id"`
+	TeamID          *string                       `json:"team_id"`
 	ProjectID       *string                       `json:"project_id"`
 	CycleID         *string                       `json:"cycle_id"`
 	CreatorID       string                        `json:"creator_id"`

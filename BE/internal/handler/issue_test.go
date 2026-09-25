@@ -33,7 +33,7 @@ func (r *testIssueRepo) Create(_ context.Context, _ *sqlx.Tx, issue *domain.Issu
 	return nil
 }
 
-func (r *testIssueRepo) NextNumber(_ context.Context, _ *sqlx.Tx, _ uuid.UUID) (int, error) {
+func (r *testIssueRepo) NextNumber(_ context.Context, _ *sqlx.Tx, _ *uuid.UUID) (int, error) {
 	return len(r.issues) + 1, nil
 }
 
@@ -63,6 +63,10 @@ func (r *testIssueRepo) List(_ context.Context, _ uuid.UUID, _ dto.IssueFilterPa
 
 func (r *testIssueRepo) Update(_ context.Context, issue *domain.Issue) error {
 	r.issues[issue.Identifier] = issue
+	return nil
+}
+
+func (r *testIssueRepo) UpdateTeam(_ context.Context, _ *sqlx.Tx, _ uuid.UUID, _ *uuid.UUID, _ int, _ string) error {
 	return nil
 }
 
@@ -386,13 +390,14 @@ func TestIssueHandler_Get_Found(t *testing.T) {
 	hub := realtime.NewHub()
 
 	wsID := uuid.New()
+	teamID := uuid.New()
 	issueRepo.issues["ENG-1"] = &domain.Issue{
 		ID:          uuid.New(),
 		WorkspaceID: wsID,
 		Identifier:  "ENG-1",
 		Title:       "Test Issue",
 		Status:      domain.IssueStatusTodo,
-		TeamID:      uuid.New(),
+		TeamID:      &teamID,
 		CreatorID:   uuid.New(),
 	}
 

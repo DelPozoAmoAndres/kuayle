@@ -34,14 +34,23 @@ func (r *IssueRepository) Create(ctx context.Context, tx *sqlx.Tx, issue *domain
 	).Scan(&issue.CreatedAt, &issue.UpdatedAt)
 }
 
-func (r *IssueRepository) NextNumber(ctx context.Context, tx *sqlx.Tx, teamID uuid.UUID) (int, error) {
-	// Advisory lock per team to guarantee sequential numbering
+func (r *IssueRepository) NextNumber(ctx context.Context, tx *sqlx.Tx, teamID *uuid.UUID) (int, error) {
 	var num int
-	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1::text))`, teamID)
+	if teamID != nil {
+		// Advisory lock per team to guarantee sequential numbering
+		_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1::text))`, *teamID)
+		if err != nil {
+			return 0, err
+		}
+		err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(number), 0) + 1 FROM issues WHERE team_id = $1`, *teamID).Scan(&num)
+		return num, err
+	}
+	// No team: use a workspace-global advisory lock and count issues with NULL team_id
+	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('noteam'))`)
 	if err != nil {
 		return 0, err
 	}
-	err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(number), 0) + 1 FROM issues WHERE team_id = $1`, teamID).Scan(&num)
+	err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(number), 0) + 1 FROM issues WHERE team_id IS NULL`).Scan(&num)
 	return num, err
 }
 
@@ -121,8 +130,12 @@ func (r *IssueRepository) List(ctx context.Context, workspaceID uuid.UUID, param
 		args["creator_id"] = params.CreatorID
 	}
 	if params.TeamID != "" {
-		where = append(where, "i.team_id = :team_id")
-		args["team_id"] = params.TeamID
+		if params.TeamID == "none" {
+			where = append(where, "i.team_id IS NULL")
+		} else {
+			where = append(where, "i.team_id = :team_id")
+			args["team_id"] = params.TeamID
+		}
 	}
 	if params.ProjectID != "" {
 		if params.ProjectID == "none" {
@@ -334,6 +347,14 @@ func (r *IssueRepository) Update(ctx context.Context, issue *domain.Issue) error
 		issue.DueDate, issue.SortOrder, issue.Triaged,
 		issue.StatusID, issue.ID,
 	).Scan(&issue.UpdatedAt)
+}
+
+func (r *IssueRepository) UpdateTeam(ctx context.Context, tx *sqlx.Tx, issueID uuid.UUID, teamID *uuid.UUID, number int, identifier string) error {
+	_, err := tx.ExecContext(ctx,
+		`UPDATE issues SET team_id = $1, number = $2, identifier_text = $3, updated_at = NOW() WHERE id = $4`,
+		teamID, number, identifier, issueID,
+	)
+	return err
 }
 
 func (r *IssueRepository) Delete(ctx context.Context, id uuid.UUID) error {

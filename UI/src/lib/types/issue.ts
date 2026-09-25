@@ -24,7 +24,7 @@ export interface Issue {
 	status_id?: string;
 	status_info?: StatusInfo;
 	priority: IssuePriority;
-	team_id: string;
+	team_id: string | null;
 	project_id: string | null;
 	cycle_id: string | null;
 	creator_id: string;
@@ -78,7 +78,7 @@ export interface CreateIssueRequest {
 	status?: IssueStatus;
 	status_id?: string;
 	priority?: IssuePriority;
-	team_id: string;
+	team_id?: string | null;
 	project_id?: string;
 	assignee_id?: string;
 	assignee_ids?: string[];
@@ -102,6 +102,7 @@ export interface UpdateIssueRequest {
 	parent_id?: string;
 	due_date?: string;
 	sort_order?: number;
+	team_id?: string | null;
 }
 
 export interface IssueHistory {

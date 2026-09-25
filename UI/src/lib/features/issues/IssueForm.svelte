@@ -28,7 +28,7 @@
 			description: description || undefined,
 			status_id: statusId || undefined,
 			priority,
-			team_id: teamId
+			team_id: teamId || undefined
 		});
 	}
 </script>
@@ -58,6 +58,7 @@
 			bind:value={teamId}
 			class="rounded border border-[var(--app-border)] bg-[var(--color-bg-secondary)] px-2 py-1.5 text-sm text-[var(--color-text-secondary)]"
 		>
+			<option value="">Sin equipo</option>
 			{#each teams as team}
 				<option value={team.id}>{team.name}</option>
 			{/each}
@@ -92,7 +93,7 @@
 		</button>
 		<button
 			type="submit"
-			disabled={!title.trim() || !teamId}
+			disabled={!title.trim()}
 			class="rounded-md bg-[var(--app-accent)] px-3 py-1.5 text-sm text-[var(--app-accent-foreground)] hover:bg-[var(--app-accent-hover)] disabled:opacity-50"
 		>
 			Create issue

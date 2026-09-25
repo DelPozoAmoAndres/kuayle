@@ -930,12 +930,15 @@ func toIssueResponse(issue domain.Issue) dto.IssueResponse {
 		Description: issue.Description,
 		Status:      string(issue.Status),
 		Priority:    int(issue.Priority),
-		TeamID:      issue.TeamID.String(),
 		CreatorID:   issue.CreatorID.String(),
 		DueDate:     issue.DueDate,
 		SortOrder:   issue.SortOrder,
 		CreatedAt:   issue.CreatedAt,
 		UpdatedAt:   issue.UpdatedAt,
+	}
+	if issue.TeamID != nil {
+		s := issue.TeamID.String()
+		resp.TeamID = &s
 	}
 	if issue.ProjectID != nil {
 		s := issue.ProjectID.String()

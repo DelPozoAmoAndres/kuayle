@@ -24,7 +24,7 @@
 	import * as ContextMenu from '$lib/components/ui/context-menu';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { Checkbox } from '$lib/components/ui/checkbox';
-	import { StatusSelector, PrioritySelector, AssigneeSelector, LabelSelector, ProjectSelector, CycleSelector } from './selectors';
+	import { StatusSelector, PrioritySelector, AssigneeSelector, LabelSelector, ProjectSelector, CycleSelector, TeamSelector } from './selectors';
 	import { createKeyboardHandler } from '$lib/utils/keyboard';
 	import {
 		ChevronUp, ChevronDown, ChevronRight, Plus, CalendarDays,
@@ -82,6 +82,7 @@
 	let titleValue = $state('');
 	let statusOpen = $state(false);
 	let priorityOpen = $state(false);
+	let teamOpen = $state(false);
 	let assigneeOpen = $state(false);
 	let labelsOpen = $state(false);
 	let cycles = $state<Cycle[]>([]);
@@ -136,7 +137,9 @@
 
 	onMount(async () => {
 		// Load team statuses (needed on direct navigation / refresh)
-		await teamStatusesState.load(slug, issue.team_id);
+		if (issue.team_id) {
+			await teamStatusesState.load(slug, issue.team_id);
+		}
 
 		const [c, h, m, l, p] = await Promise.all([
 			listComments(slug, issue.identifier),
@@ -151,7 +154,9 @@
 		labels = l ?? [];
 		projects = p ?? [];
 		loaded = true;
-		listCycles(slug, issue.team_id).then(c => cycles = c).catch(() => {});
+		if (issue.team_id) {
+			listCycles(slug, issue.team_id).then(c => cycles = c).catch(() => {});
+		}
 		listTeams(slug).then(t => teams = t).catch(() => {});
 
 		// Join presence AFTER members are loaded so names resolve correctly
@@ -176,7 +181,11 @@
 	function onIssueDeleted(e: Event) {
 		const detail = (e as CustomEvent).detail;
 		if (matchesCurrentIssue(detail)) {
-			goto(`/${slug}/teams/${issue.team_id}`);
+			if (issue.team_id) {
+				goto(`/${slug}/teams/${issue.team_id}`);
+			} else {
+				goto(`/${slug}/my-issues`);
+			}
 		}
 	}
 	function onCommentCreated(e: Event) {
@@ -195,6 +204,7 @@
 	const issueKeyHandler = createKeyboardHandler([
 		{ key: 's', handler: () => { statusOpen = true; } },
 		{ key: 'p', handler: () => { priorityOpen = true; } },
+		{ key: 't', handler: () => { teamOpen = true; } },
 		{ key: 'a', handler: () => { assigneeOpen = true; } },
 		{ key: 'l', handler: () => { labelsOpen = true; } },
 	]);
@@ -741,7 +751,7 @@
 				href="/{slug}/teams/{issue.team_id}"
 				class="shrink-0 text-[var(--color-text-tertiary)] transition-colors hover:text-[var(--color-text-primary)]"
 			>
-				{issue.identifier.split('-')[0]}
+				{issue.identifier.split('-')[0] ?? 'NOTEAM'}
 			</a>
 			<span class="shrink-0 text-[var(--color-text-tertiary)]">&rsaquo;</span>
 			<span class="truncate font-medium text-[var(--color-text-primary)]">{issue.identifier}</span>
@@ -1301,6 +1311,40 @@
 									</button>
 								{/snippet}
 							</PrioritySelector>
+						</div>
+
+						<!-- Team row -->
+						<div class="flex items-center gap-3 rounded-md px-2 py-1.5 hover:bg-[var(--color-bg-hover)] transition-colors">
+							<span class="w-20 shrink-0 text-xs text-[var(--color-text-tertiary)]">{m['issue.team']()}</span>
+							<TeamSelector
+								bind:open={teamOpen}
+								{teams}
+								value={issue.team_id ?? undefined}
+								onchange={async (newTeamId) => {
+									try {
+										lastLocalUpdate = Date.now();
+										const updated = await issuesState.update(slug, issue.identifier, { team_id: newTeamId || null });
+										onupdated?.(updated);
+										await refreshIssue();
+									} catch {
+										appToast.error(m['issue.toast.failed_update_field']({ field: 'team' }));
+									}
+								}}
+								showNone={true}
+							>
+								{#snippet trigger()}
+									<button class="flex items-center gap-1.5 text-sm text-[var(--color-text-primary)]">
+										{#if issueTeam}
+											<span class="flex h-4 w-4 items-center justify-center rounded bg-[var(--color-bg-tertiary)] text-[10px] font-medium">
+												{issueTeam.key.charAt(0)}
+											</span>
+											{issueTeam.name}
+										{:else}
+											<span class="text-[var(--color-text-tertiary)]">Sin equipo</span>
+										{/if}
+									</button>
+								{/snippet}
+							</TeamSelector>
 						</div>
 
 						<!-- Assignee row -->

@@ -83,7 +83,7 @@
 			status?: IssueStatus;
 			status_id?: string;
 			priority: IssuePriority;
-			team_id: string;
+			team_id?: string | null;
 			project_id?: string;
 			assignee_id?: string;
 			assignee_ids?: string[];
@@ -202,13 +202,13 @@
 	const selectedStatus = $derived(teamStatusesState.statusById.get(statusId));
 
 	function handleSubmit() {
-		if (!title.trim() || !teamId) return;
+		if (!title.trim()) return;
 		onsubmit({
 			title: title.trim(),
 			description: description.trim() || undefined,
 			status_id: statusId || undefined,
 			priority,
-			team_id: teamId,
+			team_id: teamId || undefined,
 			project_id: projectId || undefined,
 			assignee_ids: assigneeIds.length > 0 ? assigneeIds : undefined,
 			label_ids: labelIds.length > 0 ? labelIds : undefined,
@@ -310,13 +310,14 @@
 				{teams}
 				value={teamId}
 				onchange={handleTeamChange}
+				showNone={true}
 			>
 				{#snippet trigger()}
 					<button tabindex="-1" class="flex items-center gap-1.5 rounded-md border border-[var(--app-border)] bg-[var(--color-bg-tertiary)] px-2.5 py-1 text-xs font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]">
 						<span class="flex h-4 w-4 items-center justify-center rounded bg-[var(--app-accent)] text-[9px] font-bold text-[var(--app-accent-foreground)]">
-							{selectedTeam?.key?.charAt(0) ?? 'T'}
+							{selectedTeam?.key?.charAt(0) ?? '–'}
 						</span>
-						{selectedTeam?.key ?? m['sharedComponents.create_issue.team']()}
+						{selectedTeam?.key ?? 'Sin equipo'}
 					</button>
 				{/snippet}
 			</TeamSelector>
@@ -517,7 +518,7 @@
 			<Button
 				class="max-sm:w-full"
 				size="sm"
-				disabled={!title.trim() || !teamId}
+				disabled={!title.trim()}
 				onclick={handleSubmit}
 			>
 				{m['sharedComponents.create_issue.create_issue']()}

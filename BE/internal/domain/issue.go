@@ -30,7 +30,7 @@ const (
 type Issue struct {
 	ID          uuid.UUID     `json:"id" db:"id"`
 	WorkspaceID uuid.UUID     `json:"workspace_id" db:"workspace_id"`
-	TeamID      uuid.UUID     `json:"team_id" db:"team_id"`
+	TeamID      *uuid.UUID    `json:"team_id" db:"team_id"`
 	ProjectID   *uuid.UUID    `json:"project_id" db:"project_id"`
 	CycleID     *uuid.UUID    `json:"cycle_id" db:"cycle_id"`
 	Number      int           `json:"number" db:"number"`

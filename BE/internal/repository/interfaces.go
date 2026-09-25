@@ -61,11 +61,12 @@ type TeamRepo interface {
 
 type IssueRepo interface {
 	Create(ctx context.Context, tx *sqlx.Tx, issue *domain.Issue) error
-	NextNumber(ctx context.Context, tx *sqlx.Tx, teamID uuid.UUID) (int, error)
+	NextNumber(ctx context.Context, tx *sqlx.Tx, teamID *uuid.UUID) (int, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.Issue, error)
 	GetByIdentifier(ctx context.Context, workspaceID uuid.UUID, identifier string) (*domain.Issue, error)
 	List(ctx context.Context, workspaceID uuid.UUID, params dto.IssueFilterParams) ([]domain.Issue, int, error)
 	Update(ctx context.Context, issue *domain.Issue) error
+	UpdateTeam(ctx context.Context, tx *sqlx.Tx, issueID uuid.UUID, teamID *uuid.UUID, number int, identifier string) error
 	Delete(ctx context.Context, id uuid.UUID) error
 	SetLabels(ctx context.Context, issueID uuid.UUID, labelIDs []uuid.UUID) error
 	GetLabels(ctx context.Context, issueID uuid.UUID) ([]domain.Label, error)

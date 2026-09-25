@@ -145,6 +145,7 @@ export function bulkUpdateIssues(
 		label_ids?: string[];
 		cycle_id?: string;
 		parent_id?: string;
+		team_id?: string;
 	}
 ): Promise<{ updated: number }> {
 	return api.patch<{ updated: number }>(`/api/workspaces/${slug}/issues/bulk`, req);

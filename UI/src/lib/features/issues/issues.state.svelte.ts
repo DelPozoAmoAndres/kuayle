@@ -284,7 +284,7 @@ class IssuesState {
 		}
 	}
 
-	async bulkUpdate(slug: string, updates: { status?: string; status_id?: string; priority?: number; assignee_id?: string; label_ids?: string[]; cycle_id?: string; parent_id?: string }) {
+	async bulkUpdate(slug: string, updates: { status?: string; status_id?: string; priority?: number; assignee_id?: string; label_ids?: string[]; cycle_id?: string; parent_id?: string; team_id?: string }) {
 		const issueIds = Array.from(this.selectedIds);
 		if (issueIds.length === 0) return;
 
@@ -299,6 +299,7 @@ class IssuesState {
 				if (updates.assignee_id) (issue as any).assignee_id = updates.assignee_id;
 				if (updates.cycle_id !== undefined) (issue as any).cycle_id = updates.cycle_id || null;
 				if (updates.parent_id !== undefined) (issue as any).parent_id = updates.parent_id || null;
+				if (updates.team_id !== undefined) (issue as any).team_id = updates.team_id || null;
 			}
 		}
 		this.clearSelection();

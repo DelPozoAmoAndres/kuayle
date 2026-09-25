@@ -784,7 +784,9 @@ func (s *DevMachineService) resolveDevelopmentSetting(ctx context.Context, works
 		if issue.ProjectID != nil {
 			scopes = append(scopes, [3]*uuid.UUID{nil, issue.ProjectID, nil})
 		}
-		scopes = append(scopes, [3]*uuid.UUID{&issue.TeamID, nil, nil})
+		if issue.TeamID != nil {
+			scopes = append(scopes, [3]*uuid.UUID{issue.TeamID, nil, nil})
+		}
 	} else if project != nil {
 		scopes = append(scopes, [3]*uuid.UUID{nil, &project.ID, nil})
 		if project.TeamID != nil {

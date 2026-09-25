@@ -624,9 +624,11 @@ func (s *GiteaService) applyAutoTransition(ctx context.Context, workspaceID uuid
 	if rule.TargetStatusID != nil {
 		issue.StatusID = rule.TargetStatusID
 	} else {
-		ts, err := s.teamStatusRepo.GetByTeamAndSlug(ctx, issue.TeamID, newStatus)
-		if err == nil && ts != nil {
-			issue.StatusID = &ts.ID
+		if issue.TeamID != nil {
+			ts, err := s.teamStatusRepo.GetByTeamAndSlug(ctx, *issue.TeamID, newStatus)
+			if err == nil && ts != nil {
+				issue.StatusID = &ts.ID
+			}
 		}
 	}
 
@@ -651,8 +653,8 @@ func (s *GiteaService) applyStatusAutomation(ctx context.Context, workspaceID uu
 	visited[issue.ID] = true
 
 	category := s.issueStatusCategory(ctx, issue)
-	if category == domain.StatusCategoryCompleted {
-		team, err := s.teamRepo.GetByID(ctx, issue.TeamID)
+	if category == domain.StatusCategoryCompleted && issue.TeamID != nil {
+		team, err := s.teamRepo.GetByID(ctx, *issue.TeamID)
 		if err == nil && team != nil && team.SubIssueAutoCloseEnabled {
 			s.autoCloseSubIssues(ctx, workspaceID, issue.ID, visited)
 		}
@@ -667,7 +669,10 @@ func (s *GiteaService) maybeAutoCloseParent(ctx context.Context, workspaceID, pa
 	if err != nil || parent == nil || parent.WorkspaceID != workspaceID || visited[parent.ID] || s.teamRepo == nil {
 		return
 	}
-	team, err := s.teamRepo.GetByID(ctx, parent.TeamID)
+	if parent.TeamID == nil {
+		return
+	}
+	team, err := s.teamRepo.GetByID(ctx, *parent.TeamID)
 	if err != nil || team == nil || !team.ParentAutoCloseEnabled {
 		return
 	}
@@ -693,10 +698,10 @@ func (s *GiteaService) autoCloseSubIssues(ctx context.Context, workspaceID, pare
 }
 
 func (s *GiteaService) moveIssueToCompleted(ctx context.Context, workspaceID uuid.UUID, issue *domain.Issue, visited map[uuid.UUID]bool) {
-	if issue == nil || s.isTerminalStatus(ctx, issue) {
+	if issue == nil || issue.TeamID == nil || s.isTerminalStatus(ctx, issue) {
 		return
 	}
-	completedStatus, err := s.completedStatusForTeam(ctx, issue.TeamID)
+	completedStatus, err := s.completedStatusForTeam(ctx, *issue.TeamID)
 	if err != nil || completedStatus == nil {
 		return
 	}

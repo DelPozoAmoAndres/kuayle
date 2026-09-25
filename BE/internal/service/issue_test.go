@@ -25,7 +25,7 @@ func (m *mockIssueRepo) Create(ctx context.Context, tx *sqlx.Tx, issue *domain.I
 	return args.Error(0)
 }
 
-func (m *mockIssueRepo) NextNumber(ctx context.Context, tx *sqlx.Tx, teamID uuid.UUID) (int, error) {
+func (m *mockIssueRepo) NextNumber(ctx context.Context, tx *sqlx.Tx, teamID *uuid.UUID) (int, error) {
 	args := m.Called(ctx, tx, teamID)
 	return args.Int(0), args.Error(1)
 }
@@ -53,6 +53,11 @@ func (m *mockIssueRepo) List(ctx context.Context, workspaceID uuid.UUID, params 
 
 func (m *mockIssueRepo) Update(ctx context.Context, issue *domain.Issue) error {
 	args := m.Called(ctx, issue)
+	return args.Error(0)
+}
+
+func (m *mockIssueRepo) UpdateTeam(ctx context.Context, tx *sqlx.Tx, issueID uuid.UUID, teamID *uuid.UUID, number int, identifier string) error {
+	args := m.Called(ctx, tx, issueID, teamID, number, identifier)
 	return args.Error(0)
 }
 
@@ -435,7 +440,6 @@ func TestIssueService_Update(t *testing.T) {
 	issueRepo.On("GetByIdentifier", ctx, wsID, "ENG-1").Return(issue, nil)
 	issueRepo.On("Update", ctx, mock.AnythingOfType("*domain.Issue")).Return(nil)
 	issueRepo.On("GetAssignees", ctx, issueID).Return([]uuid.UUID{}, nil)
-	teamStatusRepo.On("GetByTeamAndSlug", ctx, issue.TeamID, "todo").Return(nil, nil)
 
 	newTitle := "New Title"
 	newStatus := "todo"
@@ -504,7 +508,6 @@ func TestIssueService_Update_ConsolidatesFieldNotifications(t *testing.T) {
 	issueRepo.On("GetByIdentifier", ctx, wsID, "ENG-1").Return(issue, nil)
 	issueRepo.On("Update", ctx, mock.AnythingOfType("*domain.Issue")).Return(nil)
 	issueRepo.On("GetAssignees", ctx, issueID).Return([]uuid.UUID{}, nil)
-	teamStatusRepo.On("GetByTeamAndSlug", ctx, issue.TeamID, "todo").Return(nil, nil)
 	historyRepo.On("Create", ctx, issueID, userID, "title", mock.AnythingOfType("*string"), &newTitle).Return(nil)
 	historyRepo.On("Create", ctx, issueID, userID, "status", mock.AnythingOfType("*string"), &newStatus).Return(nil)
 	notifRepo.On("CreateOrRefresh", ctx, mock.MatchedBy(func(n *domain.Notification) bool {
