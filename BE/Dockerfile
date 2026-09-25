@@ -8,6 +8,8 @@ RUN CGO_ENABLED=0 go build -o server ./cmd/server
 FROM alpine:3.21
 RUN apk add --no-cache ca-certificates && \
     addgroup -S appgroup && adduser -S appuser -G appgroup
+COPY rootCA.pem /usr/local/share/ca-certificates/rootCA.crt
+RUN update-ca-certificates
 WORKDIR /app
 COPY --from=builder /app/server .
 COPY --from=builder /app/migrations ./migrations
