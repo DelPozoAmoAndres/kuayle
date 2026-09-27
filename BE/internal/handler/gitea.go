@@ -10,6 +10,7 @@ import (
 	"github.com/kuayle/kuayle-backend/internal/service"
 	"github.com/kuayle/kuayle-backend/pkg/response"
 	"github.com/labstack/echo/v4"
+	log "github.com/sirupsen/logrus"
 )
 
 type GiteaHandler struct {
@@ -156,17 +157,19 @@ func (h *GiteaHandler) HandleWebhook(c echo.Context) error {
 		return c.NoContent(http.StatusBadRequest)
 	}
 
-	if signature == "" {
+	// Verify signature (service handles empty signature when no secret configured)
+	if !h.gtSvc.VerifyWebhookSignature(c.Request().Context(), uuid.Nil, body, signature) {
 		return c.NoContent(http.StatusUnauthorized)
 	}
 
-	// Resolve workspace from signature and process event
-	workspaceID, ok := h.gtSvc.ResolveAndVerifyWebhook(c.Request().Context(), body, signature)
-	if !ok {
-		return c.NoContent(http.StatusUnauthorized)
+	// Resolve workspace from the payload
+	workspaceID, err := h.gtSvc.ResolveWorkspaceFromPayload(c.Request().Context(), body)
+	if err != nil || workspaceID == uuid.Nil {
+		return c.NoContent(http.StatusNotFound)
 	}
 
 	if err := h.gtSvc.HandleWebhookEvent(c.Request().Context(), workspaceID, eventType, body); err != nil {
+		log.WithError(err).WithField("workspace_id", workspaceID).WithField("event", eventType).Warn("gitea webhook processing failed")
 		return c.NoContent(http.StatusInternalServerError)
 	}
 

@@ -76,6 +76,16 @@ func (r *GiteaRepository) GetRepoByGiteaID(ctx context.Context, workspaceID uuid
 	return &repo, err
 }
 
+// GetRepoByGiteaIDGlobal finds a repo by gitea_repo_id across all workspaces (for webhook resolution).
+func (r *GiteaRepository) GetRepoByGiteaIDGlobal(ctx context.Context, giteaRepoID int64) (*domain.GiteaRepoModel, error) {
+	var repo domain.GiteaRepoModel
+	err := r.db.GetContext(ctx, &repo, `SELECT * FROM gitea_repos WHERE gitea_repo_id = $1 AND is_active = true`, giteaRepoID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return &repo, err
+}
+
 func (r *GiteaRepository) DeleteRepo(ctx context.Context, id uuid.UUID) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM gitea_repos WHERE id = $1`, id)
 	return err

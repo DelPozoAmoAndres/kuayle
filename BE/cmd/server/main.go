@@ -179,7 +179,7 @@ func main() {
 	// Gitea integration
 	giteaRepo := repository.NewGiteaRepository(db)
 	giteaSvc := service.NewGiteaService(
-		giteaRepo, issueRepo, teamRepo, teamStatusRepo, historyRepo,
+		giteaRepo, issueRepo, teamRepo, teamStatusRepo, historyRepo, projectRepo,
 		crypto.DeriveKey(cfg.JWTSecret+":gitea"), hub, cfg.FrontendURL,
 	)
 	giteaH := handler.NewGiteaHandler(giteaSvc)

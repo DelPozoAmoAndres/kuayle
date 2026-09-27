@@ -18,7 +18,7 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { appToast } from '$lib/features/toast/toast';
-	import { ExternalLink, Plus, Loader2, Search, GitBranch } from 'lucide-svelte';
+	import { ExternalLink, Plus, Loader2, Search, GitBranch, Trash2 } from 'lucide-svelte';
 
 	const slug = $derived(page.params.workspaceSlug ?? '');
 	let status = $state<GiteaStatus | null>(null);
@@ -388,14 +388,31 @@
 									<span class="text-sm text-[var(--color-text-primary)]">{repo.full_name}</span>
 									<span class="text-xs text-[var(--color-text-tertiary)]">{repo.default_branch}</span>
 								</div>
-								<a
-									href="{status.instance?.instance_url}/{repo.full_name}"
-									target="_blank"
-									rel="noopener noreferrer"
-									class="text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]"
-								>
-									<ExternalLink size={14} />
-								</a>
+								<div class="flex items-center gap-2">
+									<a
+										href="{status.instance?.instance_url}/{repo.full_name}"
+										target="_blank"
+										rel="noopener noreferrer"
+										class="text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]"
+									>
+										<ExternalLink size={14} />
+									</a>
+									<button
+										onclick={async () => {
+											try {
+												await unlinkGiteaRepo(slug, repo.id);
+												status = await getGiteaStatus(slug);
+												appToast.success('Repository unlinked');
+											} catch {
+												appToast.error('Failed to unlink repository');
+											}
+										}}
+										class="text-[var(--color-text-tertiary)] hover:text-[var(--color-error)]"
+										title="Unlink repository"
+									>
+										<Trash2 size={14} />
+									</button>
+								</div>
 							</div>
 						{/each}
 					</div>

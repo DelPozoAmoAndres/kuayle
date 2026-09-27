@@ -45,6 +45,7 @@ type GiteaService struct {
 	teamRepo       repository.TeamRepo
 	teamStatusRepo repository.TeamStatusRepo
 	historyRepo    repository.IssueHistoryRepo
+	projectRepo    *repository.ProjectRepository
 	encryptionKey  []byte
 	hub            *realtime.Hub
 	frontendURL    string
@@ -56,6 +57,7 @@ func NewGiteaService(
 	teamRepo repository.TeamRepo,
 	teamStatusRepo repository.TeamStatusRepo,
 	historyRepo repository.IssueHistoryRepo,
+	projectRepo *repository.ProjectRepository,
 	encryptionKey []byte,
 	hub *realtime.Hub,
 	frontendURL string,
@@ -66,6 +68,7 @@ func NewGiteaService(
 		teamRepo:       teamRepo,
 		teamStatusRepo: teamStatusRepo,
 		historyRepo:    historyRepo,
+		projectRepo:    projectRepo,
 		encryptionKey:  encryptionKey,
 		hub:            hub,
 		frontendURL:    frontendURL,
@@ -268,6 +271,23 @@ func (s *GiteaService) LinkRepos(ctx context.Context, workspaceID uuid.UUID, req
 		}
 		if err := s.gtRepo.CreateRepo(ctx, repo); err != nil {
 			log.WithError(err).WithField("repo", gtRepo.FullName).Warn("failed to link repo")
+			continue
+		}
+
+		// Auto-create a Project in Kuayle for this repo
+		if s.projectRepo != nil {
+			desc := fmt.Sprintf("Auto-created from Gitea repo %s", gtRepo.FullName)
+			project := &domain.Project{
+				ID:          uuid.New(),
+				WorkspaceID: workspaceID,
+				Name:        gtRepo.FullName,
+				Description: &desc,
+				Status:      domain.ProjectStatusPlanned,
+				SortOrder:   float64(time.Now().UnixMilli()),
+			}
+			if err := s.projectRepo.Create(ctx, project); err != nil {
+				log.WithError(err).WithField("repo", gtRepo.FullName).Warn("failed to auto-create project")
+			}
 		}
 	}
 	return nil
@@ -287,8 +307,18 @@ func (s *GiteaService) Disconnect(ctx context.Context, workspaceID uuid.UUID) er
 // --- Webhook Event Processing ---
 
 // VerifyWebhookSignature verifies the Gitea webhook HMAC-SHA256 signature.
-// Gitea uses the X-Gitea-Signature header with the hex-encoded HMAC digest.
+// If no webhook secret is configured, skips verification (allows unsigned webhooks).
 func (s *GiteaService) VerifyWebhookSignature(ctx context.Context, workspaceID uuid.UUID, payload []byte, signature string) bool {
+	// If no signature header, check if we have a secret configured
+	if signature == "" {
+		oauthCfg, _ := s.gtRepo.GetOAuthConfigByWorkspace(ctx, workspaceID)
+		// No secret configured = allow unsigned webhooks
+		if oauthCfg == nil || oauthCfg.WebhookSecret == "" {
+			return true
+		}
+		return false
+	}
+
 	oauthCfg, err := s.gtRepo.GetOAuthConfigByWorkspace(ctx, workspaceID)
 	if err != nil || oauthCfg == nil {
 		return false
@@ -669,15 +699,10 @@ func (s *GiteaService) syncIssueFromGiteaOpen(ctx context.Context, workspaceID u
 		return nil
 	}
 
-	// Find a team to assign to — prefer the first available team in the workspace
-	teams, err := s.teamRepo.ListByWorkspace(ctx, workspaceID)
+	// Find or create a "Gitea" team for issues coming from Gitea
+	team, err := s.findOrCreateGiteaTeam(ctx, workspaceID)
 	if err != nil {
-		log.WithError(err).Warn("failed to list teams for workspace")
-	}
-
-	var teamID *uuid.UUID
-	if len(teams) > 0 {
-		teamID = &teams[0].ID
+		return fmt.Errorf("finding gitea team: %w", err)
 	}
 
 	tx, err := s.issueRepo.BeginTx(ctx)
@@ -686,32 +711,41 @@ func (s *GiteaService) syncIssueFromGiteaOpen(ctx context.Context, workspaceID u
 	}
 	defer tx.Rollback()
 
-	number, err := s.issueRepo.NextNumber(ctx, tx, teamID)
+	number, err := s.issueRepo.NextNumber(ctx, tx, &team.ID)
 	if err != nil {
 		return err
 	}
 
-	var identifier string
-	if teamID != nil {
-		identifier = fmt.Sprintf("%s-%d", teams[0].Key, number)
-	} else {
-		identifier = fmt.Sprintf("NOTEAM-%d", number)
+	identifier := fmt.Sprintf("%s-%d", team.Key, number)
+
+	// Use the user who connected Gitea as the creator
+	creatorID := inst.InstalledBy
+
+	// Find the project linked to this Gitea repo (by name match)
+	var projectID *uuid.UUID
+	projects, _ := s.projectRepo.ListByWorkspace(ctx, workspaceID)
+	for i := range projects {
+		if projects[i].Name == repo.FullName {
+			projectID = &projects[i].ID
+			break
+		}
 	}
 
 	issue := &domain.Issue{
 		ID:               uuid.New(),
 		WorkspaceID:      workspaceID,
-		TeamID:           teamID,
+		TeamID:           &team.ID,
+		ProjectID:        projectID,
 		Number:           number,
 		Identifier:       identifier,
 		Title:            event.Issue.Title,
 		Description:      &event.Issue.Body,
 		Status:           domain.IssueStatusTodo,
-		CreatorID:        workspaceID, // system-level creator for webhook-synced issues
+		CreatorID:        creatorID,
 		SortOrder:        -float64(number) * 1000,
 		GiteaIssueIndex:  &event.Issue.Number,
 		GiteaInstanceID:  &inst.ID,
-		Triaged:          teamID == nil,
+		Triaged:          team.TriageEnabled,
 	}
 
 	// Resolve status_id for the team
@@ -1273,4 +1307,24 @@ func (s *GiteaService) UpdateAutoTransitions(ctx context.Context, workspaceID uu
 
 func (s *GiteaService) decryptToken(encToken string) (string, error) {
 	return crypto.Decrypt(encToken, s.encryptionKey)
+}
+
+// ResolveWorkspaceFromPayload extracts the repository ID from a webhook payload
+// and finds the workspace it belongs to.
+func (s *GiteaService) ResolveWorkspaceFromPayload(ctx context.Context, payload []byte) (uuid.UUID, error) {
+	var partial struct {
+		Repository struct {
+			ID int64 `json:"id"`
+		} `json:"repository"`
+	}
+	if err := json.Unmarshal(payload, &partial); err != nil || partial.Repository.ID == 0 {
+		return uuid.Nil, fmt.Errorf("could not extract repository ID from payload")
+	}
+
+	repo, err := s.gtRepo.GetRepoByGiteaIDGlobal(ctx, partial.Repository.ID)
+	if err != nil || repo == nil {
+		return uuid.Nil, fmt.Errorf("repo not linked")
+	}
+
+	return repo.WorkspaceID, nil
 }
