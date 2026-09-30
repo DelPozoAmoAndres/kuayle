@@ -11,7 +11,12 @@ SET workspace_id = t.workspace_id
 FROM teams t
 WHERE ts.team_id = t.id AND ts.workspace_id IS NULL;
 
--- 3. Deduplicate by (workspace_id, slug) keeping the lowest position/id.
+-- 3. Statuses no longer belong to a team. This must happen BEFORE seeding
+--    workspace-level statuses, which are inserted with team_id = NULL
+--    (team_id stays as a legacy nullable column).
+ALTER TABLE team_statuses ALTER COLUMN team_id DROP NOT NULL;
+
+-- 4. Deduplicate by (workspace_id, slug) keeping the lowest position/id.
 --    Before deleting a duplicate, repoint every FK to the surviving row.
 WITH ranked AS (
     SELECT id, workspace_id, slug,
@@ -120,7 +125,7 @@ DELETE FROM team_statuses ts
 USING ranked
 WHERE ts.id = ranked.id AND ranked.rn > 1;
 
--- 4. Seed the default set for every workspace that has no statuses yet
+-- 5. Seed the default set for every workspace that has no statuses yet
 INSERT INTO team_statuses (workspace_id, team_id, name, slug, category, position, is_default)
 SELECT w.id, NULL, s.name, s.slug, s.category, s.position, s.is_default
 FROM workspaces w
@@ -135,9 +140,6 @@ CROSS JOIN (VALUES
 WHERE NOT EXISTS (
     SELECT 1 FROM team_statuses ts WHERE ts.workspace_id = w.id
 );
-
--- 5. Statuses no longer belong to a team (team_id stays as a legacy nullable column)
-ALTER TABLE team_statuses ALTER COLUMN team_id DROP NOT NULL;
 
 -- 6. One status per (workspace, slug)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_team_statuses_workspace_slug
