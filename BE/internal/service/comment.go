@@ -103,13 +103,6 @@ func (s *CommentService) Create(ctx context.Context, workspaceID, issueID, userI
 		comment.AuthorLogin = user.GiteaLogin
 		comment.AuthorAvatarURL = user.AvatarURL
 	}
-	if req.ParentID != nil {
-		pid, err := uuid.Parse(*req.ParentID)
-		if err != nil {
-			return nil, err
-		}
-		comment.ParentID = &pid
-	}
 	if err := s.commentRepo.Create(ctx, comment); err != nil {
 		return nil, err
 	}
@@ -245,10 +238,6 @@ func (s *CommentService) broadcastCommentEvent(ctx context.Context, comment *dom
 
 func (s *CommentService) ListByIssue(ctx context.Context, issueID uuid.UUID) ([]domain.Comment, error) {
 	return s.commentRepo.ListByIssue(ctx, issueID)
-}
-
-func (s *CommentService) ListReplies(ctx context.Context, parentID uuid.UUID) ([]domain.Comment, error) {
-	return s.commentRepo.ListReplies(ctx, parentID)
 }
 
 func (s *CommentService) GetByID(ctx context.Context, id uuid.UUID) (*domain.Comment, error) {

@@ -29,13 +29,9 @@ func (r *CommentRepository) Create(ctx context.Context, comment *domain.Comment)
 
 func (r *CommentRepository) ListByIssue(ctx context.Context, issueID uuid.UUID) ([]domain.Comment, error) {
 	var comments []domain.Comment
-	err := r.db.SelectContext(ctx, &comments, `SELECT * FROM comments WHERE issue_id = $1 AND parent_id IS NULL ORDER BY created_at ASC`, issueID)
-	return comments, err
-}
-
-func (r *CommentRepository) ListReplies(ctx context.Context, parentID uuid.UUID) ([]domain.Comment, error) {
-	var comments []domain.Comment
-	err := r.db.SelectContext(ctx, &comments, `SELECT * FROM comments WHERE parent_id = $1 ORDER BY created_at ASC`, parentID)
+	// Comments are flat: legacy rows with a parent_id are returned too, so old
+	// threaded replies keep showing up as regular messages.
+	err := r.db.SelectContext(ctx, &comments, `SELECT * FROM comments WHERE issue_id = $1 ORDER BY created_at ASC`, issueID)
 	return comments, err
 }
 

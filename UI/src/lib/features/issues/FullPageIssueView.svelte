@@ -74,9 +74,6 @@
 	let newComment = $state('');
 	let commentVersion = $state(0);
 	let giteaTokenRequired = $state(false);
-	let replyGiteaRequired = $state<Record<string, boolean>>({});
-	let replyContents = $state<Record<string, string>>({});
-	let replyVersions = $state<Record<string, number>>({});
 	let editingTitle = $state(false);
 	let titleValue = $state('');
 	let statusOpen = $state(false);
@@ -196,9 +193,7 @@
 		}
 	}
 	function removeCommentById(list: Comment[], commentId: string): Comment[] {
-		return list
-			.filter((c) => c.id !== commentId)
-			.map((c) => (c.replies && c.replies.length > 0 ? { ...c, replies: removeCommentById(c.replies, commentId) } : c));
+		return list.filter((c) => c.id !== commentId);
 	}
 	function onPresenceJoin(e: Event) { presenceState.handleJoin((e as CustomEvent).detail); }
 	function onPresenceLeave(e: Event) { presenceState.handleLeave((e as CustomEvent).detail); }
@@ -458,27 +453,6 @@
 				giteaTokenRequired = true;
 			} else {
 				appToast.apiError(err, m['issue.toast.failed_comment']());
-			}
-		}
-	}
-
-	async function handleReply(parentId: string) {
-		const content = replyContents[parentId] ?? '';
-		if (!content.trim() || content === '<p></p>') return;
-		try {
-			await createComment(slug, issue.identifier, content, parentId);
-			replyContents[parentId] = '';
-			replyVersions[parentId] = (replyVersions[parentId] ?? 0) + 1;
-			replyVersions = { ...replyVersions };
-			replyGiteaRequired[parentId] = false;
-			replyGiteaRequired = { ...replyGiteaRequired };
-			refreshActivity();
-		} catch (err: any) {
-			if (isGiteaTokenRequired(err)) {
-				replyGiteaRequired[parentId] = true;
-				replyGiteaRequired = { ...replyGiteaRequired };
-			} else {
-				appToast.apiError(err, m['issue.toast.failed_reply']());
 			}
 		}
 	}
@@ -1139,7 +1113,6 @@
 				<!-- Comments -->
 				<div class="mt-4 space-y-3">
 					{#each comments as comment (comment.id)}
-						{@const replyViewers = presenceState.getViewersForField(`reply-${comment.id}`)}
 						{@const commentAuthor = comment.user?.name ?? comment.author_login ?? 'User'}
 						{@const commentAvatar = comment.user?.avatar_url ?? comment.author_avatar_url}
 						<div class="rounded-lg border border-[var(--app-border)] bg-[var(--color-bg-secondary)]">
@@ -1161,15 +1134,6 @@
 									{#if comment.resolved_at}
 										<span class="text-[11px] font-medium text-green-400">{m['issue.resolved']()}</span>
 									{/if}
-									{#if replyViewers.length > 0}
-										<span class="flex items-center gap-1 ml-1">
-											{#each replyViewers as rv (rv.name)}
-												<span class="flex items-center gap-1 text-[10px] font-medium text-white px-1.5 py-0.5 rounded-full" style="background: {rv.color};">
-													{m['issue.typing']({ name: rv.name })}
-												</span>
-											{/each}
-										</span>
-									{/if}
 									<div class="ml-auto opacity-0 group-hover/comment:opacity-100 transition-opacity">
 										{#if comment.resolved_at}
 											<button onclick={() => handleReopen(comment.id)} class="flex items-center gap-1 rounded-full border border-[var(--app-border)] px-2 py-0.5 text-[11px] text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors" title={m['issue.reopen_thread']()}>
@@ -1187,85 +1151,6 @@
 								</div>
 							</div>
 
-							<!-- Replies -->
-							{#if comment.replies && comment.replies.length > 0}
-								{#each comment.replies as reply (reply.id)}
-									{@const replyAuthor = reply.user?.name ?? reply.author_login ?? 'User'}
-									{@const replyAvatar = reply.user?.avatar_url ?? reply.author_avatar_url}
-									<div class="group/reply border-t border-[var(--app-border)] px-4 py-3 pl-4">
-										<div class="flex items-center gap-2">
-											{#if replyAvatar}
-												<img src={replyAvatar} alt="" class="h-5 w-5 shrink-0 rounded-full object-cover" />
-											{:else}
-												<div class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--app-accent)] text-[8px] font-medium text-[var(--app-accent-foreground)]">
-													{replyAuthor.charAt(0).toUpperCase()}
-												</div>
-											{/if}
-											<span class="text-[13px] font-medium text-[var(--color-text-primary)]">{replyAuthor}</span>
-											{#if reply.gitea_comment_id != null}
-												<span class="rounded-full border border-[var(--app-border)] px-1.5 py-0.5 text-[10px] font-medium leading-none text-[var(--color-text-tertiary)]">{m['issue.comment_badge_gitea']()}</span>
-											{/if}
-											<span class="text-[11px] text-[var(--color-text-tertiary)]">{formatRelativeTime(reply.created_at, getLocale())}</span>
-										</div>
-										<div class="prose prose-invert prose-sm max-w-none mt-2.5 text-[13px] text-[var(--color-text-primary)] [&>p:first-child]:mt-0 [&>p:last-child]:mb-0" use:mentionInteractivity={{ slug, members, issues: issuesState.issues }}>
-											{@html sanitizeHtml(reply.body ?? '')}
-										</div>
-									</div>
-								{/each}
-							{/if}
-
-							<!-- Reply input (hidden when resolved) -->
-							{#if !comment.resolved_at}
-								<div class="border-t border-[var(--app-border)] px-4 py-3 flex flex-wrap items-start gap-3">
-									{#if replyGiteaRequired[comment.id]}
-										<div class="flex w-full flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
-											<span class="text-xs text-amber-200">{m['issue.gitea_token_required']()}</span>
-											<a
-												href={`/${slug}/settings/profile`}
-												class="rounded-md border border-amber-500/50 px-2 py-1 text-xs font-medium text-amber-100 transition-colors hover:bg-amber-500/20"
-											>
-												{m['issue.gitea_token_required_action']()}
-											</a>
-										</div>
-									{/if}
-									<div class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--app-accent)] text-[8px] font-medium text-[var(--app-accent-foreground)]">
-										{(authState.user?.name ?? 'U').charAt(0).toUpperCase()}
-									</div>
-									<div class="min-w-0 flex-1 flex items-end gap-1.5">
-										<div class="min-w-0 flex-1 my-auto">
-											{#key replyVersions[comment.id] ?? 0}
-												<RichEditor
-													content=""
-													workspaceSlug={slug}
-													placeholder={m['issue.leave_reply']()}
-													minimal={true}
-													borderless={true}
-													bubbleMenu={true}
-													uploadUrl={imageUploadUrl}
-													{members}
-													issues={issuesState.issues}
-													onupdate={(html) => { replyContents[comment.id] = html; replyContents = replyContents; if (replyGiteaRequired[comment.id]) { replyGiteaRequired[comment.id] = false; replyGiteaRequired = { ...replyGiteaRequired }; } }}
-													onsubmit={() => handleReply(comment.id)}
-													remoteCursors={getRemoteCursors(`reply-${comment.id}`)}
-													onfocus={() => presenceState.sendFocus(issue.id, `reply-${comment.id}`, 0)}
-													onblur={() => presenceState.sendFocusLeave(issue.id)}
-													oncursorchange={(pos, anchor) => presenceState.sendFocus(issue.id, `reply-${comment.id}`, pos, anchor)}
-												/>
-											{/key}
-										</div>
-										<div class="flex shrink-0 items-center gap-1.5">
-											<button
-												onclick={() => handleReply(comment.id)}
-												disabled={!(replyContents[comment.id]?.trim()) || replyContents[comment.id] === '<p></p>'}
-												class="rounded-full bg-[var(--app-accent)] p-1.5 text-[var(--app-accent-foreground)] hover:bg-[var(--app-accent-hover)] disabled:opacity-30 transition-colors"
-												title={m['issue.send']()}
-											>
-												<ArrowUp size={12} />
-											</button>
-										</div>
-									</div>
-								</div>
-							{/if}
 						</div>
 					{/each}
 

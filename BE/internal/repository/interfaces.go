@@ -91,7 +91,6 @@ type LabelRepo interface {
 type CommentRepo interface {
 	Create(ctx context.Context, comment *domain.Comment) error
 	ListByIssue(ctx context.Context, issueID uuid.UUID) ([]domain.Comment, error)
-	ListReplies(ctx context.Context, parentID uuid.UUID) ([]domain.Comment, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.Comment, error)
 	GetByGiteaCommentID(ctx context.Context, giteaCommentID int64) (*domain.Comment, error)
 	Update(ctx context.Context, id uuid.UUID, body string) error

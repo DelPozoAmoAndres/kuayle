@@ -79,9 +79,7 @@
 	}
 
 	function removeCommentById(list: Comment[], commentId: string): Comment[] {
-		return list
-			.filter((c) => c.id !== commentId)
-			.map((c) => (c.replies && c.replies.length > 0 ? { ...c, replies: removeCommentById(c.replies, commentId) } : c));
+		return list.filter((c) => c.id !== commentId);
 	}
 
 	function onCommentUpdated(e: Event) {

@@ -21,7 +21,7 @@ function getColor(userId: string): string {
 }
 
 export interface FocusInfo {
-	field: string; // 'title' | 'description' | 'comment-{id}' | 'reply-{id}'
+	field: string; // 'title' | 'description' | 'comment-{id}'
 	position: number;
 	anchor?: number; // selection start (when different from position, there's an active selection)
 }

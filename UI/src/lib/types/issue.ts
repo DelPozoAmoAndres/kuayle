@@ -156,13 +156,11 @@ export interface Comment {
 	issue_id: string;
 	user_id?: string | null;
 	body: string;
-	parent_id?: string;
 	resolved_at?: string;
 	user?: User | null;
 	author_login?: string | null;
 	author_avatar_url?: string | null;
 	gitea_comment_id?: number | null;
-	replies?: Comment[];
 	created_at: string;
 	updated_at: string;
 }

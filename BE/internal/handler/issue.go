@@ -404,18 +404,7 @@ func (h *IssueHandler) ListComments(c echo.Context) error {
 	ctx := c.Request().Context()
 	resp := make([]dto.CommentResponse, len(comments))
 	for i, comment := range comments {
-		cr := h.toCommentResponse(ctx, comment)
-
-		// Fetch replies for this top-level comment
-		replies, err := h.commentSvc.ListReplies(ctx, comment.ID)
-		if err == nil && len(replies) > 0 {
-			cr.Replies = make([]dto.CommentResponse, len(replies))
-			for j, reply := range replies {
-				cr.Replies[j] = h.toCommentResponse(ctx, reply)
-			}
-		}
-
-		resp[i] = cr
+		resp[i] = h.toCommentResponse(ctx, comment)
 	}
 
 	return response.Success(c, http.StatusOK, resp)
@@ -447,10 +436,6 @@ func (h *IssueHandler) toCommentResponse(ctx context.Context, comment domain.Com
 				AvatarURL:   user.AvatarURL,
 			}
 		}
-	}
-	if comment.ParentID != nil {
-		s := comment.ParentID.String()
-		cr.ParentID = &s
 	}
 	return cr
 }
