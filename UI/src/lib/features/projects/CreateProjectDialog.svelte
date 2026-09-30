@@ -1,49 +1,35 @@
 <script lang="ts">
 	import * as Dialog from '$lib/components/ui/dialog';
-	import * as Select from '$lib/components/ui/select';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
-
-	import type { Team } from '$lib/types/team';
 	import { m } from '$lib/paraglide/messages.js';
 	import { getLocale, setLocale } from '$lib/paraglide/runtime.js';
 
 	let {
 		open = $bindable(false),
-		onsubmit,
-		teams = [],
-		defaultTeamId
+		onsubmit
 	}: {
 		open: boolean;
-		onsubmit: (data: { name: string; description?: string; team_id?: string }) => void;
-		teams?: Team[];
-		defaultTeamId?: string;
+		onsubmit: (data: { name: string; description?: string }) => void;
 	} = $props();
 
 	let name = $state('');
 	let description = $state('');
-	let teamId = $state('');
 
 	$effect(() => {
 		if (open) {
 			name = '';
 			description = '';
-			teamId = defaultTeamId ?? '';
 		}
 	});
-
-	const selectedTeamLabel = $derived(
-		teamId ? (teams.find((t) => t.id === teamId)?.name ?? m['projects.create.select_team']()) : m['projects.create.no_team']()
-	);
 
 	function handleSubmit(e: Event) {
 		e.preventDefault();
 		if (!name.trim()) return;
 		onsubmit({
 			name: name.trim(),
-			description: description.trim() || undefined,
-			team_id: teamId || undefined
+			description: description.trim() || undefined
 		});
 		open = false;
 	}
@@ -73,34 +59,6 @@
 						class="bg-[var(--color-bg)] border-[var(--app-border)] text-[var(--color-text-primary)]"
 					/>
 				</div>
-
-				{#if teams.length > 0}
-					<div class="space-y-1.5">
-						<Label class="text-xs text-[var(--color-text-secondary)]"
-							>{m['projects.field.team']()} <span class="text-[var(--color-text-tertiary)]">{m['cycles.field.optional']()}</span
-							></Label
-						>
-						<Select.Root
-							type="single"
-							value={teamId}
-							onValueChange={(v) => (teamId = v ?? '')}
-						>
-							<Select.Trigger
-								class="w-full bg-[var(--color-bg)] border-[var(--app-border)] text-[var(--color-text-primary)]"
-							>
-								{selectedTeamLabel}
-							</Select.Trigger>
-							<Select.Content>
-								<Select.Item value="" label={m['projects.create.no_team']()}>{m['projects.create.no_team']()}</Select.Item>
-								{#each teams as team}
-									<Select.Item value={team.id} label={team.name}
-										>{team.name}</Select.Item
-									>
-								{/each}
-							</Select.Content>
-						</Select.Root>
-					</div>
-				{/if}
 
 				<div class="space-y-1.5">
 					<Label class="text-xs text-[var(--color-text-secondary)]"

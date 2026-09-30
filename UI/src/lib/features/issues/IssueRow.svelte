@@ -1,11 +1,10 @@
 <script lang="ts">
 	import type { Issue, RelationType, IssuePriority } from '$lib/types/issue';
 	import { getPriorityLabel } from '$lib/types/issue';
-	import { teamStatusesState } from './team-statuses.state.svelte';
+	import { statusesState } from './statuses.state.svelte';
 	import type { WorkspaceMember } from '$lib/types/workspace';
 	import type { Label } from '$lib/types/label';
 	import type { Project } from '$lib/types/project';
-	import type { Cycle } from '$lib/types/cycle';
 	import IssueStatusIcon from './IssueStatusIcon.svelte';
 	import IssuePriorityIcon from './IssuePriorityIcon.svelte';
 	import SubIssueCounterTag from './SubIssueCounterTag.svelte';
@@ -28,7 +27,6 @@
 		members = [],
 		labels = [],
 		projects = [],
-		cycles = [],
 		onclick,
 		lastSelectedId = null,
 		onlastselected,
@@ -40,7 +38,6 @@
 		members?: WorkspaceMember[];
 		labels?: Label[];
 		projects?: Project[];
-		cycles?: Cycle[];
 		onclick: (issue: Issue) => void;
 		lastSelectedId?: string | null;
 		onlastselected?: (id: string) => void;
@@ -49,7 +46,6 @@
 	} = $props();
 
 	const isSelected = $derived(issuesState.selectedIds.has(issue.id));
-	const issueCycle = $derived(issue.cycle_id ? cycles.find(c => c.id === issue.cycle_id) : null);
 	const priorityValues: IssuePriority[] = [0, 1, 2, 3, 4];
 	const isMobile = new IsMobile();
 	const relatedCount = $derived(issue.relation_counts?.related ?? 0);
@@ -154,7 +150,7 @@
 	}
 </script>
 
-	<IssueContextMenu {issue} {slug} {members} {labels} {projects} {cycles} onaddrelation={(type) => onaddrelation?.(issue, type)}>
+	<IssueContextMenu {issue} {slug} {members} {labels} {projects} onaddrelation={(type) => onaddrelation?.(issue, type)}>
 	<button
 		class="group flex min-h-12 w-full items-center gap-2 rounded-none border-b border-[var(--app-border)] px-3 py-2 text-left transition-colors duration-100 hover:bg-black/[0.02] dark:hover:bg-white/[0.02] sm:mx-2 sm:min-h-0 sm:w-[calc(100%-1rem)] sm:rounded-md sm:border-b-0 sm:py-1.5 {isSelected ? 'bg-black/[0.02] dark:bg-white/[0.02]' : ''}"
 		onclick={handleClick}
@@ -218,7 +214,7 @@
 					/>
 				</Popover.Trigger>
 				<Popover.Content class="w-44 p-1" align="start">
-					{#each teamStatusesState.statusOrder as ts}
+					{#each statusesState.statusOrder as ts}
 						<button
 							onclick={() => { updateField('status_id', ts.id); statusOpen = false; }}
 							class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] {issue.status_id === ts.id ? 'bg-[var(--color-bg-hover)]' : ''}"
@@ -301,14 +297,6 @@
 		</div>
 
 		<IssueLabelChips labels={issue.labels ?? []} />
-
-		<!-- Cycle -->
-		{#if issueCycle}
-			<span class="hidden shrink-0 items-center gap-1 rounded-full border border-[var(--app-border)] bg-[var(--color-bg-secondary)] px-1.5 py-0 text-[11px] leading-5 text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] hover:border-[var(--app-border-hover)] hover:bg-[var(--color-bg-tertiary)] transition-colors sm:inline-flex">
-				<RefreshCw size={10} class="text-[var(--color-text-tertiary)]" />
-				{issueCycle.name}
-			</span>
-		{/if}
 
 		<!-- Due date -->
 		{#if issue.due_date}

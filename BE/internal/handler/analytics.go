@@ -3,7 +3,6 @@ package handler
 import (
 	"net/http"
 
-	"github.com/google/uuid"
 	"github.com/kuayle/kuayle-backend/internal/domain"
 	"github.com/kuayle/kuayle-backend/internal/dto"
 	"github.com/kuayle/kuayle-backend/internal/repository"
@@ -21,17 +20,8 @@ func NewAnalyticsHandler(repo *repository.AnalyticsRepository) *AnalyticsHandler
 
 func (h *AnalyticsHandler) Overview(c echo.Context) error {
 	ws := c.Get("workspace").(*domain.Workspace)
-	var params dto.AnalyticsScopeParams
-	if err := c.Bind(&params); err != nil {
-		return response.Error(c, http.StatusBadRequest, "INVALID_PARAMS", "Invalid parameters")
-	}
-	if params.TeamID != "" {
-		if _, err := uuid.Parse(params.TeamID); err != nil {
-			return response.Error(c, http.StatusBadRequest, "INVALID_PARAMS", "invalid team_id")
-		}
-	}
 
-	overview, err := h.repo.Overview(c.Request().Context(), ws.ID.String(), params.TeamID)
+	overview, err := h.repo.Overview(c.Request().Context(), ws.ID.String())
 	if err != nil {
 		return response.InternalError(c)
 	}
@@ -41,17 +31,8 @@ func (h *AnalyticsHandler) Overview(c echo.Context) error {
 
 func (h *AnalyticsHandler) IssueDistribution(c echo.Context) error {
 	ws := c.Get("workspace").(*domain.Workspace)
-	var params dto.AnalyticsScopeParams
-	if err := c.Bind(&params); err != nil {
-		return response.Error(c, http.StatusBadRequest, "INVALID_PARAMS", "Invalid parameters")
-	}
-	if params.TeamID != "" {
-		if _, err := uuid.Parse(params.TeamID); err != nil {
-			return response.Error(c, http.StatusBadRequest, "INVALID_PARAMS", "invalid team_id")
-		}
-	}
 
-	dist, err := h.repo.Distribution(c.Request().Context(), ws.ID.String(), params.TeamID)
+	dist, err := h.repo.Distribution(c.Request().Context(), ws.ID.String())
 	if err != nil {
 		return response.InternalError(c)
 	}

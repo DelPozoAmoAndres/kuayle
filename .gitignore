@@ -32,3 +32,6 @@ coverage/
 .vscode/
 /.claude/settings.local.json
 test-results/
+
+# OpenCode (skills/specs con credenciales)
+.opencode/

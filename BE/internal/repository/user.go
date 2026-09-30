@@ -75,6 +75,26 @@ func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*domain.
 }
 
 func (r *UserRepository) Update(ctx context.Context, user *domain.User) error {
-	query := `UPDATE users SET name = $1, display_name = $2, avatar_url = $3, updated_at = NOW() WHERE id = $4 RETURNING updated_at`
-	return r.db.QueryRowContext(ctx, query, user.Name, user.DisplayName, user.AvatarURL, user.ID).Scan(&user.UpdatedAt)
+	query := `UPDATE users SET name = $1, display_name = $2, avatar_url = $3, gitea_login = $4, updated_at = NOW() WHERE id = $5 RETURNING updated_at`
+	return r.db.QueryRowContext(ctx, query, user.Name, user.DisplayName, user.AvatarURL, user.GiteaLogin, user.ID).Scan(&user.UpdatedAt)
+}
+
+// GetWorkspaceMemberByGiteaLogin resolves a Gitea login to a workspace member.
+// The login is not globally unique across Gitea instances, so it is always
+// scoped to the membership of the given workspace. It returns (nil, nil) when
+// no member of the workspace has that Gitea login linked.
+func (r *UserRepository) GetWorkspaceMemberByGiteaLogin(ctx context.Context, workspaceID uuid.UUID, login string) (*domain.User, error) {
+	var user domain.User
+	query := `SELECT u.* FROM users u
+		INNER JOIN workspace_members m ON m.user_id = u.id
+		WHERE m.workspace_id = $1 AND u.gitea_login IS NOT NULL AND LOWER(u.gitea_login) = LOWER($2)
+		LIMIT 1`
+	err := r.db.GetContext(ctx, &user, query, workspaceID, login)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
 }

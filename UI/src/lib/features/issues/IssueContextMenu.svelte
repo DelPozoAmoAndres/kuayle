@@ -1,11 +1,10 @@
 <script lang="ts">
 	import type { Issue, IssuePriority, RelationType } from '$lib/types/issue';
 	import { getPriorityLabel } from '$lib/types/issue';
-	import { teamStatusesState } from './team-statuses.state.svelte';
+	import { statusesState } from './statuses.state.svelte';
 	import type { WorkspaceMember } from '$lib/types/workspace';
 	import type { Label } from '$lib/types/label';
 	import type { Project } from '$lib/types/project';
-	import type { Cycle } from '$lib/types/cycle';
 	import * as ContextMenu from '$lib/components/ui/context-menu';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import IssueStatusIcon from './IssueStatusIcon.svelte';
@@ -43,7 +42,6 @@
 		members = [],
 		labels = [],
 		projects = [],
-		cycles = [],
 		onaddrelation,
 		children
 	}: {
@@ -52,7 +50,6 @@
 		members?: WorkspaceMember[];
 		labels?: Label[];
 		projects?: Project[];
-		cycles?: Cycle[];
 		onaddrelation?: (type: RelationType) => void;
 		children: Snippet;
 	} = $props();
@@ -207,7 +204,7 @@
 				</span>
 			</ContextMenu.SubTrigger>
 			<ContextMenu.SubContent class="w-44">
-				{#each teamStatusesState.statusOrder as ts}
+				{#each statusesState.statusOrder as ts}
 					<ContextMenu.Item onclick={() => updateField('status_id', ts.id)}>
 						<span class={rowClass}>
 							<IssueStatusIcon category={ts.category} color={ts.color} size={14} />
@@ -300,18 +297,6 @@
 					<ContextMenu.Item onclick={() => updateField('project_id', null)}><span class={rowClass}><X class={iconClass} />{m['common.context_menu.no_project']()}</span></ContextMenu.Item>
 					{#each projects as project}
 						<ContextMenu.Item onclick={() => updateField('project_id', project.id)}><span class={rowClass}><FolderKanban class={iconClass} />{project.name}</span></ContextMenu.Item>
-					{/each}
-				</ContextMenu.SubContent>
-			</ContextMenu.Sub>
-		{/if}
-
-		{#if cycles && cycles.length > 0}
-			<ContextMenu.Sub>
-				<ContextMenu.SubTrigger><span class={rowClass}><RefreshCw class={iconClass} />{m['common.context_menu.cycle']()}</span></ContextMenu.SubTrigger>
-				<ContextMenu.SubContent class="w-48">
-					<ContextMenu.Item onclick={() => updateField('cycle_id', null)}><span class={rowClass}><X class={iconClass} />{m['common.context_menu.no_cycle']()}</span></ContextMenu.Item>
-					{#each cycles as cycle}
-						<ContextMenu.Item onclick={() => updateField('cycle_id', cycle.id)}><span class={rowClass}><RefreshCw class={iconClass} />{cycle.name}</span></ContextMenu.Item>
 					{/each}
 				</ContextMenu.SubContent>
 			</ContextMenu.Sub>

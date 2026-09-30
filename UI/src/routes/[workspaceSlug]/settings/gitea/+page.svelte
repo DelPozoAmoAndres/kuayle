@@ -264,6 +264,8 @@
 			<p class="text-xs text-[var(--color-text-tertiary)]">
 				Create a Personal Access Token in <strong>Gitea → Settings → Applications → Generate Token</strong> with the <code>repo</code> scope.
 				Webhook URL: <code>/api/gitea/webhook</code>
+				<br />
+				Webhook events to enable: <code>issues</code>, <code>issue_comment</code> (comments sync), <code>pull_request</code>, <code>push</code>.
 			</p>
 		</div>
 	{:else}

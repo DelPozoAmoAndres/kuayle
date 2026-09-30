@@ -1,7 +1,7 @@
 import type { Issue, IssueStatus, IssuePriority, CreateIssueRequest, UpdateIssueRequest } from '$lib/types/issue';
 import * as issueApi from '$lib/api/issues';
 import { preferencesState, type GroupByField } from '$lib/features/preferences/preferences.state.svelte';
-import type { StatusCategory } from '$lib/types/team-status';
+import type { StatusCategory } from '$lib/types/status';
 
 export type { GroupByField } from '$lib/features/preferences/preferences.state.svelte';
 
@@ -92,10 +92,9 @@ class IssuesState {
 			result.sort((a, b) => {
 				const aIssue = a.issues[0];
 				const bIssue = b.issues[0];
-				const teamId = this.filters.team;
-				const mode = preferencesState.getWorkflowSortMode(this.currentSlug, teamId);
+				const mode = preferencesState.getWorkflowSortMode();
 				if (mode !== 'default') {
-					const order = preferencesState.getWorkflowSortOrder(this.currentSlug, teamId);
+					const order = preferencesState.getWorkflowSortOrder();
 					const aCategory = aIssue?.status_info?.category as StatusCategory | undefined;
 					const bCategory = bIssue?.status_info?.category as StatusCategory | undefined;
 					const aRank = aCategory ? order.indexOf(aCategory) : -1;
@@ -224,9 +223,9 @@ class IssuesState {
 
 	async create(slug: string, req: CreateIssueRequest): Promise<Issue> {
 		const issue = await issueApi.createIssue(slug, req);
-		// Only add to local list if it matches the current team filter
-		const teamFilter = this.filters.team;
-		if (!teamFilter || issue.team_id === teamFilter) {
+		// Only add to the local list if it matches the current project filter
+		const projectFilter = this.filters.project;
+		if (!projectFilter || (projectFilter !== 'none' && issue.project_id === projectFilter)) {
 			const existingIndex = this.issues.findIndex((existing) => existing.id === issue.id);
 			if (existingIndex >= 0) {
 				this.issues[existingIndex] = issue;
@@ -284,7 +283,7 @@ class IssuesState {
 		}
 	}
 
-	async bulkUpdate(slug: string, updates: { status?: string; status_id?: string; priority?: number; assignee_id?: string; label_ids?: string[]; cycle_id?: string; parent_id?: string; team_id?: string }) {
+	async bulkUpdate(slug: string, updates: { status?: string; status_id?: string; priority?: number; assignee_id?: string; label_ids?: string[]; parent_id?: string }) {
 		const issueIds = Array.from(this.selectedIds);
 		if (issueIds.length === 0) return;
 
@@ -297,9 +296,7 @@ class IssuesState {
 				if (updates.status) (issue as any).status = updates.status;
 				if (updates.priority !== undefined) (issue as any).priority = updates.priority;
 				if (updates.assignee_id) (issue as any).assignee_id = updates.assignee_id;
-				if (updates.cycle_id !== undefined) (issue as any).cycle_id = updates.cycle_id || null;
 				if (updates.parent_id !== undefined) (issue as any).parent_id = updates.parent_id || null;
-				if (updates.team_id !== undefined) (issue as any).team_id = updates.team_id || null;
 			}
 		}
 		this.clearSelection();

@@ -2,10 +2,8 @@
 	import type { Issue, IssuePriority, RelationType } from '$lib/types/issue';
 	import { getPriorityLabel } from '$lib/types/issue';
 	import type { Label } from '$lib/types/label';
-	import type { Cycle } from '$lib/types/cycle';
-	import type { Team } from '$lib/types/team';
 	import type { WorkspaceMember } from '$lib/types/workspace';
-	import { teamStatusesState } from './team-statuses.state.svelte';
+	import { statusesState } from './statuses.state.svelte';
 	import { issuesState } from './issues.state.svelte';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { appToast } from '$lib/features/toast/toast';
@@ -26,19 +24,15 @@
 		slug,
 		labels = [],
 		members = [],
-		cycles,
-		teams = [],
 		onlabelcreated
 	}: {
 		slug: string;
 		labels?: Label[];
 		members?: WorkspaceMember[];
-		cycles?: Cycle[];
-		teams?: Team[];
 		onlabelcreated?: (label: Label) => void;
 	} = $props();
 
-	type BulkCommand = 'assignee' | 'status' | 'priority' | 'label' | 'cycle' | 'due_date' | 'team_change' | 'parent' | 'subissue' | 'duplicate' | 'related' | 'unparent';
+	type BulkCommand = 'assignee' | 'status' | 'priority' | 'label' | 'due_date' | 'parent' | 'subissue' | 'duplicate' | 'related' | 'unparent';
 
 	interface BulkCommandOption {
 		id: BulkCommand;
@@ -68,7 +62,6 @@
 	let unparentOpen = $state(false);
 	let creatingLabel = $state(false);
 	let createdLabels = $state<Label[]>([]);
-	let showCycleActions = $derived(cycles !== undefined);
 	let visibleLabels = $derived([
 		...createdLabels.filter((createdLabel) => !labels.some((label) => label.id === createdLabel.id)),
 		...labels,
@@ -82,12 +75,7 @@
 			{ id: 'due_date', title: m['bulkActions.commands.due_date_title'](), description: m['bulkActions.commands.due_date_desc'](), keywords: 'due date deadline calendar' },
 		];
 
-		if (showCycleActions) {
-			options.push({ id: 'cycle', title: m['bulkActions.commands.cycle_title'](), description: m['bulkActions.commands.cycle_desc'](), keywords: 'cycle sprint iteration' });
-		}
-
 		options.push(
-			{ id: 'team_change', title: m['bulkActions.commands.team_change_title'](), description: m['bulkActions.commands.team_change_desc'](), keywords: 'team change move reassign' },
 			{ id: 'parent', title: m['bulkActions.commands.parent_title'](), description: m['bulkActions.commands.parent_desc'](), keywords: 'parent subissue sub issue' },
 			{ id: 'subissue', title: m['bulkActions.commands.subissue_title'](), description: m['bulkActions.commands.subissue_desc'](), keywords: 'subissue sub issue child parent' },
 			{ id: 'duplicate', title: m['bulkActions.commands.duplicate_title'](), description: m['bulkActions.commands.duplicate_desc'](), keywords: 'duplicate duplicated copy' },
@@ -104,8 +92,8 @@
 	});
 	let filteredStatuses = $derived.by(() => {
 		const term = searchQuery.trim().toLowerCase();
-		if (!term) return teamStatusesState.statusOrder;
-		return teamStatusesState.statusOrder.filter((status) => `${status.name} ${status.category}`.toLowerCase().includes(term));
+		if (!term) return statusesState.statusOrder;
+		return statusesState.statusOrder.filter((status) => `${status.name} ${status.category}`.toLowerCase().includes(term));
 	});
 	let filteredMembers = $derived.by(() => {
 		const term = searchQuery.trim().toLowerCase();
@@ -122,16 +110,6 @@
 		if (!term) return visibleLabels;
 		return visibleLabels.filter((label) => label.name.toLowerCase().includes(term));
 	});
-	let filteredCycles = $derived.by(() => {
-		const term = searchQuery.trim().toLowerCase();
-		if (!term) return cycles ?? [];
-		return (cycles ?? []).filter((cycle) => cycle.name.toLowerCase().includes(term));
-	});
-	let filteredTeams = $derived.by(() => {
-		const term = searchQuery.trim().toLowerCase();
-		if (!term) return teams;
-		return teams.filter((team) => `${team.name} ${team.key}`.toLowerCase().includes(term));
-	});
 	let activeTitle = $derived(commands.find((command) => command.id === activeCommand)?.title ?? m['bulkActions.title']());
 	let searchPlaceholder = $derived(activeCommand ? m['bulkActions.search_scope']({ scope: activeTitle.toLowerCase() }) : m['bulkActions.search_placeholder']());
 	let canCreateLabel = $derived(activeCommand === 'label' && searchQuery.trim() && !visibleLabels.some((label) => label.name.toLowerCase() === searchQuery.trim().toLowerCase()));
@@ -147,8 +125,6 @@
 		if (activeCommand === 'status') return filteredStatuses.length;
 		if (activeCommand === 'priority') return filteredPriorities.length;
 		if (activeCommand === 'label') return filteredLabels.length + (canCreateLabel ? 1 : 0);
-		if (activeCommand === 'cycle') return filteredCycles.length + 1;
-		if (activeCommand === 'team_change') return filteredTeams.length + 1;
 		if (activeCommand === 'due_date') return 0;
 		return 0;
 	});
@@ -301,20 +277,6 @@
 				const label = filteredLabels[labelIndex];
 				if (label) void bulkAddLabel(label.id);
 			}
-		} else if (activeCommand === 'cycle') {
-			if (selectedIndex === 0) {
-				void bulkSetCycle(null);
-			} else {
-				const cycle = filteredCycles[selectedIndex - 1];
-				if (cycle) void bulkSetCycle(cycle.id);
-			}
-		} else if (activeCommand === 'team_change') {
-			if (selectedIndex === 0) {
-				void bulkSetTeam(null);
-			} else {
-				const team = filteredTeams[selectedIndex - 1];
-				if (team) void bulkSetTeam(team.id);
-			}
 		}
 	}
 
@@ -442,28 +404,6 @@
 	function randomLabelColor() {
 		const presetColors = ['#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', '#3b82f6', '#6366f1', '#8b5cf6', '#ec4899', '#6b7280'];
 		return presetColors[Math.floor(Math.random() * presetColors.length)];
-	}
-
-	async function bulkSetCycle(cycleId: string | null) {
-		const count = issuesState.selectionCount;
-		try {
-			await issuesState.bulkUpdate(slug, { cycle_id: cycleId ?? '' });
-			appToast.success(cycleId ? m['bulkActions.toast.cycle_assigned']({ n: count, s: _s(count) }) : m['bulkActions.toast.cycle_removed']({ n: count, s: _s(count) }));
-			closeActions();
-		} catch (err: any) {
-			appToast.apiError(err, m['bulkActions.toast.failed_cycle']());
-		}
-	}
-
-	async function bulkSetTeam(teamId: string | null) {
-		const count = issuesState.selectionCount;
-		try {
-			await issuesState.bulkUpdate(slug, { team_id: teamId ?? '' } as any);
-			appToast.success(teamId ? m['bulkActions.toast.team_changed']({ n: count, s: _s(count) }) : m['bulkActions.toast.team_removed']({ n: count, s: _s(count) }));
-			closeActions();
-		} catch (err: any) {
-			appToast.apiError(err, 'Failed to change team');
-		}
 	}
 
 	async function bulkSetParent(parent: Issue) {
@@ -617,8 +557,6 @@
 											<Flag size={16} />
 										{:else if commandIcon(command.id) === 'label'}
 											<Tag size={16} />
-										{:else if commandIcon(command.id) === 'cycle'}
-											<RefreshCw size={16} />
 										{:else if commandIcon(command.id) === 'due_date'}
 											<CalendarDays size={16} />
 										{:else if commandIcon(command.id) === 'parent'}
@@ -701,38 +639,6 @@
 								<button id={`bulk-action-row-${rowIndex}`} class={optionButtonClass} data-selected={selectedIndex === rowIndex} onpointerenter={() => (selectedIndex = rowIndex)} onclick={() => bulkAddLabel(label.id)}>
 									<span class="h-2.5 w-2.5 shrink-0 rounded-full" style="background-color: {label.color}"></span>
 									<span class="truncate">{label.name}</span>
-								</button>
-							{/each}
-						{/if}
-					{:else if activeCommand === 'cycle'}
-						<button id="bulk-action-row-0" class={optionButtonClass} data-selected={selectedIndex === 0} onpointerenter={() => (selectedIndex = 0)} onclick={() => bulkSetCycle(null)}>
-							<RefreshCw size={14} class="text-[var(--color-text-tertiary)]" />
-							<span class="truncate text-[var(--color-text-tertiary)]">{m['bulkActions.cycle.no_cycle']()}</span>
-						</button>
-						{#if filteredCycles.length === 0}
-							<div class="py-8 text-center text-xs text-[var(--color-text-tertiary)]">{m['bulkActions.no_cycles']()}</div>
-						{:else}
-							{#each filteredCycles as cycle, index (cycle.id)}
-								{@const rowIndex = index + 1}
-								<button id={`bulk-action-row-${rowIndex}`} class={optionButtonClass} data-selected={selectedIndex === rowIndex} onpointerenter={() => (selectedIndex = rowIndex)} onclick={() => bulkSetCycle(cycle.id)}>
-									<RefreshCw size={14} class="text-[var(--color-text-tertiary)]" />
-									<span class="truncate">{cycle.name}</span>
-								</button>
-							{/each}
-						{/if}
-					{:else if activeCommand === 'team_change'}
-						<button id="bulk-action-row-0" class={optionButtonClass} data-selected={selectedIndex === 0} onpointerenter={() => (selectedIndex = 0)} onclick={() => bulkSetTeam(null)}>
-							<span class="flex h-5 w-5 items-center justify-center rounded bg-[var(--color-bg-tertiary)] text-[10px] font-medium shrink-0">–</span>
-							<span class="truncate text-[var(--color-text-tertiary)]">Sin equipo</span>
-						</button>
-						{#if filteredTeams.length === 0}
-							<div class="py-8 text-center text-xs text-[var(--color-text-tertiary)]">No teams found</div>
-						{:else}
-							{#each filteredTeams as team, index (team.id)}
-								{@const rowIndex = index + 1}
-								<button id={`bulk-action-row-${rowIndex}`} class={optionButtonClass} data-selected={selectedIndex === rowIndex} onpointerenter={() => (selectedIndex = rowIndex)} onclick={() => bulkSetTeam(team.id)}>
-									<span class="flex h-5 w-5 items-center justify-center rounded bg-[var(--color-bg-tertiary)] text-[10px] font-medium shrink-0">{team.key.charAt(0)}</span>
-									<span class="truncate">{team.name}</span>
 								</button>
 							{/each}
 						{/if}

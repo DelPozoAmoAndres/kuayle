@@ -271,6 +271,15 @@ func (r *testUserRepo) Update(_ context.Context, user *domain.User) error {
 	return nil
 }
 
+func (r *testUserRepo) GetWorkspaceMemberByGiteaLogin(_ context.Context, _ uuid.UUID, login string) (*domain.User, error) {
+	for _, u := range r.createdUsers {
+		if u.GiteaLogin != nil && strings.EqualFold(*u.GiteaLogin, login) {
+			return u, nil
+		}
+	}
+	return nil, nil
+}
+
 type testRefreshTokenRepo struct {
 	tokens map[string]*repository.RefreshToken
 }

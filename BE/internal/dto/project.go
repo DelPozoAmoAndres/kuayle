@@ -5,7 +5,6 @@ import "time"
 type CreateProjectRequest struct {
 	Name        string  `json:"name" validate:"required,min=1,max=200"`
 	Description *string `json:"description"`
-	TeamID      *string `json:"team_id" validate:"omitempty,uuid"`
 	LeadID      *string `json:"lead_id" validate:"omitempty,uuid"`
 	StartDate   *string `json:"start_date"`
 	TargetDate  *string `json:"target_date"`
@@ -15,7 +14,6 @@ type UpdateProjectRequest struct {
 	Name        *string  `json:"name" validate:"omitempty,min=1,max=200"`
 	Description *string  `json:"description"`
 	Status      *string  `json:"status" validate:"omitempty,oneof=planned in_progress completed cancelled"`
-	TeamID      *string  `json:"team_id" validate:"omitempty,uuid"`
 	LeadID      *string  `json:"lead_id" validate:"omitempty,uuid"`
 	StartDate   *string  `json:"start_date"`
 	TargetDate  *string  `json:"target_date"`
@@ -27,7 +25,6 @@ type ProjectResponse struct {
 	Name        string                   `json:"name"`
 	Description *string                  `json:"description"`
 	Status      string                   `json:"status"`
-	TeamID      *string                  `json:"team_id"`
 	LeadID      *string                  `json:"lead_id"`
 	StartDate   *time.Time               `json:"start_date"`
 	TargetDate  *time.Time               `json:"target_date"`

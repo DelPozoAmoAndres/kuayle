@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { IssueStatus, IssuePriority } from '$lib/types/issue';
 	import { getPriorityLabel } from '$lib/types/issue';
-	import { teamStatusesState } from './team-statuses.state.svelte';
+	import { statusesState } from './statuses.state.svelte';
 	import type { WorkspaceMember } from '$lib/types/workspace';
 	import type { Project } from '$lib/types/project';
 	import IssueStatusIcon from './IssueStatusIcon.svelte';
@@ -34,7 +34,7 @@
 	const label = $derived.by(() => {
 		switch (groupBy) {
 			case 'status': {
-				const ts = teamStatusesState.statusById.get(groupKey);
+				const ts = statusesState.statusById.get(groupKey);
 				if (ts) return ts.name;
 				// Fall back to label from groupedIssues (derived from status_info)
 				return groupLabel ?? groupKey;
@@ -74,7 +74,7 @@
 		{/if}
 
 		{#if groupBy === 'status'}
-			{@const ts = teamStatusesState.statusById.get(groupKey)}
+			{@const ts = statusesState.statusById.get(groupKey)}
 			<IssueStatusIcon status={groupKey as IssueStatus} category={ts?.category} color={ts?.color} size={14} />
 		{:else if groupBy === 'priority'}
 			<IssuePriorityIcon priority={Number(groupKey) as IssuePriority} size={14} />

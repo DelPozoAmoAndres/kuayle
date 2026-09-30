@@ -14,11 +14,9 @@
 	import * as Select from '$lib/components/ui/select';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import SidebarToggle from '$lib/components/layout/SidebarToggle.svelte';
-	import TeamIcon from '$lib/components/shared/TeamIcon.svelte';
 	import LoadingState from '$lib/components/shared/LoadingState.svelte';
 	import ErrorState from '$lib/components/shared/ErrorState.svelte';
-	import { listTeams } from '$lib/api/teams';
-	import { listTeamStatuses } from '$lib/api/team-statuses';
+	import { listStatuses } from '$lib/api/statuses';
 	import {
 		defaultDateRange,
 		getAnalyticsBurnup,
@@ -28,8 +26,7 @@
 		type AnalyticsDistribution,
 		type AnalyticsOverview
 	} from '$lib/api/analytics';
-	import type { Team } from '$lib/types/team';
-	import type { TeamStatus } from '$lib/types/team-status';
+	import type { WorkspaceStatus } from '$lib/types/status';
 	import OverviewCards from '$lib/features/analytics/OverviewCards.svelte';
 	import DistributionChart from '$lib/features/analytics/DistributionChart.svelte';
 	import BurnupChart from '$lib/features/analytics/BurnupChart.svelte';
@@ -44,13 +41,7 @@
 
 	const initialTab = page.url.searchParams.get('tab');
 	let activeTab = $state<Tab>(initialTab === 'explore' ? 'explore' : 'overview');
-	let selectedTeamId = $state(page.url.searchParams.get('team') ?? 'workspace');
-	let teams = $state<Team[]>([]);
-	let statuses = $state<TeamStatus[]>([]);
-	let teamsLoading = $state(true);
-	const selectedTeam = $derived(teams.find((team) => team.id === selectedTeamId));
-	const teamScoped = $derived(selectedTeamId !== 'workspace');
-	const analyticsScope = $derived(teamScoped ? { team_id: selectedTeamId } : {});
+	let statuses = $state<WorkspaceStatus[]>([]);
 
 	let overview = $state<AnalyticsOverview | null>(null);
 	let distribution = $state<AnalyticsDistribution | null>(null);
@@ -77,29 +68,14 @@
 		return error instanceof Error ? error.message : fallback;
 	}
 
-	async function loadTeams(requestSlug: string) {
-		teamsLoading = true;
-		try {
-			teams = await listTeams(requestSlug);
-			if (selectedTeamId !== 'workspace' && !teams.some((team) => team.id === selectedTeamId)) {
-				selectedTeamId = 'workspace';
-			}
-		} catch {
-			teams = [];
-		} finally {
-			teamsLoading = false;
-		}
-	}
-
-	async function loadOverview(requestSlug = slug, teamId = selectedTeamId) {
+	async function loadOverview(requestSlug = slug) {
 		const id = ++overviewLoadId;
 		overviewLoading = true;
 		overviewError = null;
 		try {
-			const scope = teamId === 'workspace' ? {} : { team_id: teamId };
 			const [nextOverview, nextDistribution] = await Promise.all([
-				getAnalyticsOverview(requestSlug, scope),
-				getAnalyticsDistribution(requestSlug, scope)
+				getAnalyticsOverview(requestSlug),
+				getAnalyticsDistribution(requestSlug)
 			]);
 			if (id === overviewLoadId) {
 				overview = nextOverview;
@@ -118,7 +94,6 @@
 
 	async function loadBurnup(
 		requestSlug = slug,
-		teamId = selectedTeamId,
 		from = burnupFrom,
 		to = burnupTo,
 		interval = burnupInterval
@@ -135,8 +110,7 @@
 			const nextBurnup = await getAnalyticsBurnup(requestSlug, {
 				from,
 				to,
-				interval,
-				...(teamId === 'workspace' ? {} : { team_id: teamId })
+				interval
 			});
 			if (id === burnupLoadId) burnup = nextBurnup;
 		} catch (error: unknown) {
@@ -151,23 +125,15 @@
 
 	$effect(() => {
 		const requestSlug = slug;
-		if (requestSlug) void loadTeams(requestSlug);
-	});
-
-	$effect(() => {
-		const teamId = selectedTeamId;
-		if (teamId === 'workspace') {
-			statuses = [];
-			return;
-		}
+		if (!requestSlug) return;
 		statuses = [];
 		let current = true;
-		void listTeamStatuses(slug, teamId)
+		void listStatuses(requestSlug)
 			.then((nextStatuses) => {
-				if (current && teamId === selectedTeamId) statuses = nextStatuses;
+				if (current) statuses = nextStatuses;
 			})
 			.catch(() => {
-				if (current && teamId === selectedTeamId) statuses = [];
+				if (current) statuses = [];
 			});
 		return () => {
 			current = false;
@@ -175,14 +141,14 @@
 	});
 
 	$effect(() => {
-		void loadOverview(slug, selectedTeamId);
+		void loadOverview(slug);
 		return () => {
 			overviewLoadId += 1;
 		};
 	});
 
 	$effect(() => {
-		void loadBurnup(slug, selectedTeamId, burnupFrom, burnupTo, burnupInterval);
+		void loadBurnup(slug, burnupFrom, burnupTo, burnupInterval);
 		return () => {
 			burnupLoadId += 1;
 		};
@@ -191,12 +157,9 @@
 	$effect(() => {
 		const url = new URL(page.url.href);
 		const currentTab = url.searchParams.get('tab') ?? 'overview';
-		const currentTeam = url.searchParams.get('team') ?? 'workspace';
-		if (currentTab === activeTab && currentTeam === selectedTeamId) return;
+		if (currentTab === activeTab) return;
 		if (activeTab === 'overview') url.searchParams.delete('tab');
 		else url.searchParams.set('tab', activeTab);
-		if (selectedTeamId === 'workspace') url.searchParams.delete('team');
-		else url.searchParams.set('team', selectedTeamId);
 		void goto(url.pathname + url.search, { replaceState: true, noScroll: true, keepFocus: true });
 	});
 </script>
@@ -212,35 +175,12 @@
 		<div class="shrink-0 border-b border-[var(--app-border)] bg-[var(--color-bg-secondary)]/35">
 			<div class="mx-auto flex w-full max-w-[1440px] flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6">
 				<div class="flex min-w-0 items-center gap-3">
-					<Select.Root type="single" value={selectedTeamId} disabled={teamsLoading} onValueChange={(value) => value && (selectedTeamId = value)}>
-						<Select.Trigger size="sm" aria-label={m['insights.team_scope']()} class="w-[220px] max-w-full bg-[var(--color-bg)]">
-							{#if selectedTeam}
-								<TeamIcon team={selectedTeam} size={14} />
-								<span class="truncate">{selectedTeam.name}</span>
-							{:else}
-								<Building2 size={14} class="text-[var(--color-text-tertiary)]" />
-								<span>{m['insights.all_workspace_teams']()}</span>
-							{/if}
-						</Select.Trigger>
-						<Select.Content>
-							<Select.Item value="workspace">
-								<Building2 size={14} class="text-[var(--color-text-tertiary)]" />
-								{m['insights.all_workspace_teams']()}
-							</Select.Item>
-							{#each teams as team}
-								<Select.Item value={team.id}>
-									<TeamIcon {team} size={14} />
-									{team.name}
-								</Select.Item>
-							{/each}
-						</Select.Content>
-					</Select.Root>
 					<div class="hidden min-w-0 md:block">
 						<p class="truncate text-xs font-medium text-[var(--color-text-primary)]">
-							{selectedTeam?.name ?? m['insights.workspace_overview']()}
+							{m['insights.workspace_overview']()}
 						</p>
 						<p class="truncate text-[11px] text-[var(--color-text-tertiary)]">
-							{teamScoped ? m['insights.using_team_workflow']() : m['insights.workflow_types_comparable']()}
+							{m['insights.workflow_types_comparable']()}
 						</p>
 					</div>
 				</div>
@@ -274,7 +214,7 @@
 						{:else if overviewError}
 							<ErrorState message={overviewError} onretry={loadOverview} />
 						{:else}
-							<OverviewCards {overview} {teamScoped} />
+							<OverviewCards {overview} />
 						{/if}
 					</section>
 
@@ -285,11 +225,11 @@
 								<div>
 									<h2 class="text-xs font-medium text-[var(--color-text-primary)]">{m['insights.work_distribution']()}</h2>
 									<p class="text-[11px] text-[var(--color-text-tertiary)]">
-										{teamScoped ? m['insights.using_custom_statuses']({ team: selectedTeam?.name ?? 'team' }) : m['insights.workflow_types_comparable_teams']()}
+										{m['insights.workflow_types_comparable_teams']()}
 									</p>
 								</div>
 							</div>
-							<DistributionChart {distribution} {teamScoped} />
+							<DistributionChart {distribution} />
 						</section>
 					{/if}
 
@@ -338,7 +278,7 @@
 								<p class="text-[11px] text-[var(--color-text-tertiary)]">{m['insights.build_insight_desc']()}</p>
 							</div>
 						</div>
-						<InsightsExplorer {slug} filters={analyticsScope} {statuses} />
+						<InsightsExplorer {slug} {statuses} />
 					</section>
 				{/if}
 			</div>

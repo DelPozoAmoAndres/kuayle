@@ -12,7 +12,7 @@ Dev Machines target trusted self-hosted workspaces. Docker hardening reduces ris
 
 - A Dev Machine is a logical workspace composed of cooperating containers. It is never a monolithic IDE/browser/agent container.
 - Generic machine creation does not require repository, branch, issue, project, or manual TTL input. Friendly random names are case-insensitively unique per creator within a workspace and can be checked through the availability API.
-- Repository and environment defaults resolve from issue, then project, then team, then workspace. One machine has affinity to one repository and can host multiple issue worktrees from that repository; use a separate machine for another repository/environment or concurrent conflicting workload.
+- Repository and environment defaults resolve from issue, then project, then workspace. One machine has affinity to one repository and can host multiple issue worktrees from that repository; use a separate machine for another repository/environment or concurrent conflicting workload.
 - The Kuayle API does not receive the Docker socket.
 - Agent, developer, browser, collector, egress, and gateway containers do not receive the Docker socket.
 - The Machine Manager is the only Dev Machines runtime component with Docker socket access and is treated as host-privileged. The separately optional system updater also mounts the socket when enabled.
@@ -341,7 +341,7 @@ Reserved `KUAYLE_*` variables and `GITHUB_TOKEN` cannot be supplied by users.
 
 ## Scoped Settings, Worktrees, and Environments
 
-Development defaults are stored in `dev_machine_scope_settings`. A setting may provide a linked GitHub repository, base branch, and/or development environment for a workspace, team, project, or issue. Repository and environment values are resolved independently in this order: issue, project, team, workspace. This lets an issue override only the repository while inheriting an environment, or vice versa.
+Development defaults are stored in `dev_machine_scope_settings`. A setting may provide a linked GitHub repository, base branch, and/or development environment for a workspace, project, or issue. Repository and environment values are resolved independently in this order: issue, project, workspace. This lets an issue override only the repository while inheriting an environment, or vice versa.
 
 Machine creation accepts optional issue/project/repository information but does not require it. If no repository resolves, legacy repository fields remain empty and the machine starts as a generic developer workspace. When an issue is opened, `POST /dev-machines/:machineId/checkouts` resolves the issue's development settings, enforces the machine's repository affinity, and creates an idempotent issue worktree under `/workspace/tasks/{issue-key}`. A machine can hold multiple ready checkouts from the same repository; checkouts from another repository or environment require a separate machine.
 
@@ -351,7 +351,7 @@ Environment deletion is two-phase. The API marks an environment `delete_requeste
 
 ## GitHub Integration
 
-Dev Machines use GitHub App installation tokens, not broad personal access tokens. Generic machines may start without a repository; issue checkouts resolve the linked repository through issue, project, team, then workspace development settings. Once a machine has repository affinity, additional issue worktrees must use the same linked repository.
+Dev Machines use GitHub App installation tokens, not broad personal access tokens. Generic machines may start without a repository; issue checkouts resolve the linked repository through issue, project, then workspace development settings. Once a machine has repository affinity, additional issue worktrees must use the same linked repository.
 
 Required GitHub App repository permissions:
 
@@ -415,7 +415,7 @@ Migration `000033_dev_machines` creates:
 | `dev_machine_resource_samples` | CPU, RAM, disk, PID, and network samples |
 | `dev_machine_workspace_policies` | Workspace quota and allowlist configuration |
 | `dev_machine_environments` | Immutable local OCI environment images and two-phase deletion state |
-| `dev_machine_scope_settings` | Workspace/team/project/issue repository, branch, and environment defaults |
+| `dev_machine_scope_settings` | Workspace/project/issue repository, branch, and environment defaults |
 | `dev_machine_checkouts` | Idempotent issue worktrees with repository and branch metadata |
 | `dev_machine_terminal_sessions` | User terminal tabs mapped to runtime tmux sessions and optional checkouts |
 | `dev_machine_runtime_credentials` | Encrypted, expiring runtime-secret registrations used for telemetry redaction |

@@ -47,6 +47,14 @@ func (m *mockUserRepo) Update(ctx context.Context, user *domain.User) error {
 	return args.Error(0)
 }
 
+func (m *mockUserRepo) GetWorkspaceMemberByGiteaLogin(ctx context.Context, workspaceID uuid.UUID, login string) (*domain.User, error) {
+	args := m.Called(ctx, workspaceID, login)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.User), args.Error(1)
+}
+
 type mockRefreshTokenRepo struct {
 	mock.Mock
 }
@@ -335,6 +343,71 @@ func TestGetUserByID_NotFound(t *testing.T) {
 
 	assert.Error(t, err)
 	assert.Nil(t, user)
+}
+
+func TestUpdateProfile_GiteaLogin(t *testing.T) {
+	ctx := context.Background()
+	userID := uuid.New()
+
+	setupService := func(existing *domain.User) (*AuthService, *mockUserRepo) {
+		userRepo := new(mockUserRepo)
+		refreshRepo := new(mockRefreshTokenRepo)
+		userRepo.On("GetByID", ctx, userID).Return(existing, nil)
+		return NewAuthService(userRepo, refreshRepo, "test-secret"), userRepo
+	}
+
+	t.Run("stores a valid gitea login", func(t *testing.T) {
+		svc, userRepo := setupService(&domain.User{ID: userID, Email: "test@example.com", Name: "Test"})
+		userRepo.On("Update", ctx, mock.AnythingOfType("*domain.User")).Return(nil)
+
+		login := "octo.cat_1"
+		user, err := svc.UpdateProfile(ctx, userID, dto.UpdateProfileRequest{GiteaLogin: &login})
+
+		assert.NoError(t, err)
+		if assert.NotNil(t, user.GiteaLogin) {
+			assert.Equal(t, "octo.cat_1", *user.GiteaLogin)
+		}
+		userRepo.AssertExpectations(t)
+	})
+
+	t.Run("rejects an invalid gitea login", func(t *testing.T) {
+		svc, userRepo := setupService(&domain.User{ID: userID, Email: "test@example.com", Name: "Test"})
+
+		login := "not a login!"
+		user, err := svc.UpdateProfile(ctx, userID, dto.UpdateProfileRequest{GiteaLogin: &login})
+
+		assert.ErrorIs(t, err, ErrInvalidGiteaLogin)
+		assert.Nil(t, user)
+		userRepo.AssertNotCalled(t, "Update", mock.Anything, mock.Anything)
+	})
+
+	t.Run("empty value clears the gitea login", func(t *testing.T) {
+		previous := "octo.cat"
+		svc, userRepo := setupService(&domain.User{ID: userID, Email: "test@example.com", Name: "Test", GiteaLogin: &previous})
+		userRepo.On("Update", ctx, mock.AnythingOfType("*domain.User")).Return(nil)
+
+		login := "   "
+		user, err := svc.UpdateProfile(ctx, userID, dto.UpdateProfileRequest{GiteaLogin: &login})
+
+		assert.NoError(t, err)
+		assert.Nil(t, user.GiteaLogin)
+		userRepo.AssertExpectations(t)
+	})
+
+	t.Run("keeps the gitea login when the field is omitted", func(t *testing.T) {
+		previous := "octo.cat"
+		svc, userRepo := setupService(&domain.User{ID: userID, Email: "test@example.com", Name: "Test", GiteaLogin: &previous})
+		userRepo.On("Update", ctx, mock.AnythingOfType("*domain.User")).Return(nil)
+
+		name := "New Name"
+		user, err := svc.UpdateProfile(ctx, userID, dto.UpdateProfileRequest{Name: &name})
+
+		assert.NoError(t, err)
+		if assert.NotNil(t, user.GiteaLogin) {
+			assert.Equal(t, "octo.cat", *user.GiteaLogin)
+		}
+		userRepo.AssertExpectations(t)
+	})
 }
 
 // Helper to generate bcrypt hash for tests

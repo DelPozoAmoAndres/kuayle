@@ -5,7 +5,7 @@
 	import * as echarts from 'echarts';
 	import type { AnalyticsDistribution } from '$lib/api/analytics';
 	import { getPriorityLabel, type IssuePriority } from '$lib/types/issue';
-	import { getCategoryLabel, type StatusCategory } from '$lib/types/team-status';
+	import { getCategoryLabel, type StatusCategory } from '$lib/types/status';
 	import {
 		getAnalyticsChartTheme,
 		observeAnalyticsTheme,
@@ -14,9 +14,8 @@
 	} from './chart-theme';
 
 	let {
-		distribution,
-		teamScoped = false
-	}: { distribution: AnalyticsDistribution | null; teamScoped?: boolean } = $props();
+		distribution
+	}: { distribution: AnalyticsDistribution | null } = $props();
 
 	type Tab = 'status' | 'priority';
 	let activeTab = $state<Tab>('status');
@@ -29,19 +28,16 @@
 		const groups = new Map<string, NonNullable<AnalyticsDistribution['by_status']>[number]>();
 		for (const status of distribution?.by_status ?? []) {
 			if (status.count === 0) continue;
-			const key = teamScoped ? `${status.category}:${status.name.trim().toLowerCase()}` : status.category;
-			const normalized = teamScoped
-				? status
-				: {
-						...status,
-						status_id: status.category,
-						name: getCategoryLabel(status.category as StatusCategory) ?? status.category,
-						color: null
-					};
+			const key = status.category;
+			const normalized = {
+				...status,
+				status_id: status.category,
+				name: getCategoryLabel(status.category as StatusCategory) ?? status.category,
+				color: null
+			};
 			const existing = groups.get(key);
 			if (existing) {
 				existing.count += normalized.count;
-				if (teamScoped) existing.color ||= normalized.color;
 			} else {
 				groups.set(key, { ...normalized });
 			}
@@ -190,7 +186,7 @@
 				? 'bg-[var(--app-accent)]/10 text-[var(--color-text-primary)]'
 				: 'text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]'}"
 		>
-			{teamScoped ? m['insights.by_status']() : m['insights.by_status_type']()}
+			{m['insights.by_status_type']()}
 		</button>
 		<button
 			onclick={() => (activeTab = 'priority')}

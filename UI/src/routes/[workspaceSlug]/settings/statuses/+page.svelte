@@ -1,21 +1,24 @@
 <script lang="ts">
 	import { flip } from 'svelte/animate';
 	import { page } from '$app/state';
-	import type { TeamStatus, StatusCategory } from '$lib/types/team-status';
-	import { CATEGORY_ORDER, getCategoryLabel } from '$lib/types/team-status';
-	import { preferencesState, type TeamWorkflowSortMode } from '$lib/features/preferences/preferences.state.svelte';
-	import { listTeamStatuses, createTeamStatus, updateTeamStatus, deleteTeamStatus } from '$lib/api/team-statuses';
+	import type { WorkspaceStatus, StatusCategory } from '$lib/types/status';
+	import { CATEGORY_ORDER, getCategoryLabel } from '$lib/types/status';
+	import type { Project } from '$lib/types/project';
+	import { listStatuses, createStatus, updateStatus, deleteStatus } from '$lib/api/statuses';
+	import { listProjects } from '$lib/api/projects';
+	import { statusesState } from '$lib/features/issues/statuses.state.svelte';
 	import IssueStatusIcon from '$lib/features/issues/IssueStatusIcon.svelte';
-	import * as Select from '$lib/components/ui/select';
+	import { Checkbox } from '$lib/components/ui/checkbox';
+	import * as Popover from '$lib/components/ui/popover';
 	import { appToast } from '$lib/features/toast/toast';
 	import { m } from '$lib/paraglide/messages.js';
 	import { getLocale, setLocale } from '$lib/paraglide/runtime.js';
-	import { Plus, Trash2, Pencil, X, Check, GripVertical, ArrowUp, ArrowDown } from 'lucide-svelte';
+	import { Plus, Trash2, Pencil, X, Check, GripVertical, FolderKanban, Globe } from 'lucide-svelte';
 
 	const slug = $derived(page.params.workspaceSlug ?? '');
-	const teamId = $derived(page.params.teamId ?? '');
 
-	let statuses = $state<TeamStatus[]>([]);
+	let statuses = $state<WorkspaceStatus[]>([]);
+	let projects = $state<Project[]>([]);
 	let loading = $state(true);
 
 	let addingCategory = $state<StatusCategory | null>(null);
@@ -26,48 +29,40 @@
 	let editName = $state('');
 	let editColor = $state('');
 
+	let visibilityOpenId = $state<string | null>(null);
+
 	let dragStatusId = $state<string | null>(null);
 	let dragOverStatusId = $state<string | null>(null);
 	let dragCategory = $state<StatusCategory | null>(null);
 	let dragOverCategory = $state<StatusCategory | null>(null);
 	let dropIndicator = $state<'above' | 'below'>('below');
-	let workflowDragCategory = $state<StatusCategory | null>(null);
-	let workflowDragOverCategory = $state<StatusCategory | null>(null);
-	let workflowDropIndicator = $state<'above' | 'below'>('below');
 
-	const teamWorkflowOverride = $derived(preferencesState.getTeamWorkflowSortOverride(slug, teamId));
-	const teamWorkflowOrder = $derived(
-		teamWorkflowOverride.mode === 'custom' && teamWorkflowOverride.workflowSortOrder
-			? teamWorkflowOverride.workflowSortOrder
-			: preferencesState.getWorkflowSortOrder(slug, teamId)
-	);
-	const workflowSortLabels = $derived<Record<TeamWorkflowSortMode, string>>({
-		inherit: m['team_settings.sort_mode.inherit'](),
-		default: m['team_settings.sort_mode.default'](),
-		'active-first': m['team_settings.sort_mode.active_first'](),
-		custom: m['team_settings.sort_mode.custom']()
-	});
 	$effect(() => {
 		const s = slug;
-		const t = teamId;
-		if (!s || !t) return;
+		if (!s) return;
 		loading = true;
 		editingId = null;
 		addingCategory = null;
-		listTeamStatuses(s, t).then((st) => {
-			statuses = st;
-			loading = false;
-		});
+		Promise.all([listStatuses(s), listProjects(s)])
+			.then(([st, pr]) => {
+				statuses = st;
+				projects = pr;
+				loading = false;
+			})
+			.catch(() => {
+				loading = false;
+			});
 	});
 
 	async function loadStatuses() {
-		statuses = await listTeamStatuses(slug, teamId);
+		statuses = await listStatuses(slug);
+		void statusesState.reload(slug);
 	}
 
 	async function handleAdd() {
 		if (!addName.trim() || !addingCategory) return;
 		try {
-			await createTeamStatus(slug, teamId, {
+			await createStatus(slug, {
 				name: addName.trim(),
 				category: addingCategory,
 				color: addColor || undefined
@@ -76,13 +71,13 @@
 			addColor = '';
 			addingCategory = null;
 			await loadStatuses();
-			appToast.success(m['team_settings.toast.status_created']());
+			appToast.success(m['settings.statuses.created']());
 		} catch (err: any) {
-			appToast.apiError(err, m['team_settings.toast.status_create_failed']());
+			appToast.apiError(err, m['settings.statuses.failed_create']());
 		}
 	}
 
-	function startEdit(status: TeamStatus) {
+	function startEdit(status: WorkspaceStatus) {
 		editingId = status.id;
 		editName = status.name;
 		editColor = status.color ?? '';
@@ -91,29 +86,29 @@
 	async function saveEdit() {
 		if (!editingId || !editName.trim()) return;
 		try {
-			await updateTeamStatus(slug, teamId, editingId, {
+			await updateStatus(slug, editingId, {
 				name: editName.trim(),
 				color: editColor || undefined
 			});
 			editingId = null;
 			await loadStatuses();
-			appToast.success(m['team_settings.toast.status_updated']());
+			appToast.success(m['settings.statuses.updated']());
 		} catch (err: any) {
-			appToast.apiError(err, m['team_settings.toast.status_update_failed']());
+			appToast.apiError(err, m['settings.statuses.failed_update']());
 		}
 	}
 
 	async function handleDelete(statusId: string) {
 		try {
-			await deleteTeamStatus(slug, teamId, statusId);
+			await deleteStatus(slug, statusId);
 			await loadStatuses();
-			appToast.success(m['team_settings.toast.status_deleted']());
+			appToast.success(m['settings.statuses.deleted']());
 		} catch (err: any) {
-			appToast.apiError(err, m['team_settings.toast.status_delete_failed']());
+			appToast.apiError(err, m['settings.statuses.failed_delete']());
 		}
 	}
 
-	function statusesByCategory(cat: StatusCategory): TeamStatus[] {
+	function statusesByCategory(cat: StatusCategory): WorkspaceStatus[] {
 		return statuses.filter((s) => s.category === cat).sort((a, b) => a.position - b.position);
 	}
 
@@ -123,76 +118,53 @@
 		addColor = '';
 	}
 
-	function setTeamWorkflowSortMode(mode: TeamWorkflowSortMode) {
-		preferencesState.setTeamWorkflowSortOverride(slug, teamId, {
-			mode,
-			workflowSortOrder: mode === 'custom' ? teamWorkflowOrder : teamWorkflowOverride.workflowSortOrder
-		});
+	// ── Project visibility (project_ids) ──
+	function visibleProjectIds(status: WorkspaceStatus): Set<string> {
+		const explicit = status.project_ids;
+		if (!explicit || explicit.length === 0) {
+			return new Set(projects.map((p) => p.id));
+		}
+		return new Set(explicit);
 	}
 
-	function moveTeamWorkflowCategory(category: StatusCategory, direction: -1 | 1) {
-		const order = [...teamWorkflowOrder];
-		const index = order.indexOf(category);
-		const nextIndex = index + direction;
-		if (index < 0 || nextIndex < 0 || nextIndex >= order.length) return;
-		[order[index], order[nextIndex]] = [order[nextIndex], order[index]];
-		preferencesState.setTeamWorkflowSortOverride(slug, teamId, {
-			mode: 'custom',
-			workflowSortOrder: order
-		});
+	function visibilityLabel(status: WorkspaceStatus): string {
+		const explicit = status.project_ids;
+		if (!explicit || explicit.length === 0 || explicit.length === projects.length) {
+			return m['settings.statuses.visible_all_projects']();
+		}
+		return m['settings.statuses.visible_projects_count']({ count: explicit.length });
 	}
 
-	function handleWorkflowDragStart(e: DragEvent, category: StatusCategory) {
-		workflowDragCategory = category;
-		if (e.dataTransfer) {
-			e.dataTransfer.effectAllowed = 'move';
-			e.dataTransfer.setData('text/plain', category);
+	async function toggleProjectVisibility(status: WorkspaceStatus, projectId: string) {
+		const current = visibleProjectIds(status);
+		if (current.has(projectId)) {
+			current.delete(projectId);
+		} else {
+			current.add(projectId);
+		}
+		// Every project selected (or none selected) means "visible everywhere".
+		const next =
+			current.size === 0 || current.size === projects.length
+				? []
+				: projects.map((p) => p.id).filter((id) => current.has(id));
+		await persistProjectIds(status, next);
+	}
+
+	async function showAllProjects(status: WorkspaceStatus) {
+		await persistProjectIds(status, []);
+	}
+
+	async function persistProjectIds(status: WorkspaceStatus, projectIds: string[]) {
+		try {
+			await updateStatus(slug, status.id, { project_ids: projectIds });
+			await loadStatuses();
+		} catch (err: any) {
+			appToast.apiError(err, m['settings.statuses.failed_update']());
 		}
 	}
 
-	function handleWorkflowDragOver(e: DragEvent, category: StatusCategory) {
-		if (!workflowDragCategory) return;
-		e.preventDefault();
-		if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
-		workflowDragOverCategory = category;
-		const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-		workflowDropIndicator = e.clientY < rect.top + rect.height / 2 ? 'above' : 'below';
-	}
-
-	function handleWorkflowDragEnd() {
-		workflowDragCategory = null;
-		workflowDragOverCategory = null;
-		workflowDropIndicator = 'below';
-	}
-
-	function handleWorkflowDrop(e: DragEvent, targetCategory: StatusCategory) {
-		e.preventDefault();
-		const sourceCategory = (e.dataTransfer?.getData('text/plain') || workflowDragCategory) as StatusCategory | null;
-		if (!sourceCategory || sourceCategory === targetCategory) {
-			handleWorkflowDragEnd();
-			return;
-		}
-
-		const order = [...teamWorkflowOrder];
-		const sourceIndex = order.indexOf(sourceCategory);
-		const targetIndex = order.indexOf(targetCategory);
-		if (sourceIndex === -1 || targetIndex === -1) {
-			handleWorkflowDragEnd();
-			return;
-		}
-
-		const [moved] = order.splice(sourceIndex, 1);
-		const adjustedTargetIndex = order.indexOf(targetCategory);
-		const insertIndex = workflowDropIndicator === 'below' ? adjustedTargetIndex + 1 : adjustedTargetIndex;
-		order.splice(insertIndex, 0, moved);
-		preferencesState.setTeamWorkflowSortOverride(slug, teamId, {
-			mode: 'custom',
-			workflowSortOrder: order
-		});
-		handleWorkflowDragEnd();
-	}
-
-	function handleDragStart(e: DragEvent, status: TeamStatus) {
+	// ── Drag & drop reordering inside a category ──
+	function handleDragStart(e: DragEvent, status: WorkspaceStatus) {
 		dragStatusId = status.id;
 		dragCategory = status.category;
 		if (e.dataTransfer) {
@@ -201,7 +173,7 @@
 		}
 	}
 
-	function handleDragOver(e: DragEvent, status: TeamStatus) {
+	function handleDragOver(e: DragEvent, status: WorkspaceStatus) {
 		if (!dragStatusId) return;
 		dragOverCategory = status.category;
 
@@ -242,7 +214,7 @@
 		dragOverStatusId = null;
 	}
 
-	async function handleDrop(e: DragEvent, targetStatus: TeamStatus) {
+	async function handleDrop(e: DragEvent, targetStatus: WorkspaceStatus) {
 		e.preventDefault();
 		if (!dragStatusId || dragStatusId === targetStatus.id) {
 			handleDragEnd();
@@ -272,9 +244,10 @@
 		handleDragEnd();
 
 		try {
-			await Promise.all(updatedCat.map((s, i) => updateTeamStatus(slug, teamId, s.id, { position: i })));
+			await Promise.all(updatedCat.map((s, i) => updateStatus(slug, s.id, { position: i })));
+			void statusesState.reload(slug);
 		} catch {
-			appToast.error(m['team_settings.toast.reorder_failed']());
+			appToast.error(m['settings.statuses.failed_reorder']());
 			await loadStatuses();
 		}
 	}
@@ -283,102 +256,10 @@
 </script>
 
 <div class="mx-auto max-w-2xl px-8 py-10">
-	<h1 class="text-2xl font-semibold text-[var(--color-text-primary)]">{m['team_settings.statuses_title']()}</h1>
+	<h1 class="text-2xl font-semibold text-[var(--color-text-primary)]">{m['settings.statuses.title']()}</h1>
 	<p class="mt-2 text-sm text-[var(--color-text-tertiary)]">
-		{m['team_settings.statuses_desc']()}
+		{m['settings.statuses.desc']()}
 	</p>
-
-	<div class="mt-6 rounded-lg border border-[var(--app-border)] bg-[var(--color-bg-secondary)]">
-		<div class="flex items-center justify-between px-5 py-4">
-			<div>
-				<p class="text-sm font-medium text-[var(--color-text-primary)]">{m['team_settings.issue_list_sorting']()}</p>
-				<p class="text-xs text-[var(--color-text-tertiary)]">
-					{m['team_settings.issue_list_sorting_desc']()}
-				</p>
-			</div>
-			<Select.Root
-				type="single"
-				value={teamWorkflowOverride.mode}
-				onValueChange={(v) => {
-					if (v) setTeamWorkflowSortMode(v as TeamWorkflowSortMode);
-				}}
-			>
-				<Select.Trigger size="sm" class="w-[145px]">
-					{workflowSortLabels[teamWorkflowOverride.mode]}
-				</Select.Trigger>
-				<Select.Content>
-					<Select.Item value="inherit">{m['team_settings.sort_mode.inherit']()}</Select.Item>
-					<Select.Item value="default">{m['team_settings.sort_mode.default']()}</Select.Item>
-					<Select.Item value="active-first">{m['team_settings.sort_mode.active_first']()}</Select.Item>
-					<Select.Item value="custom">{m['team_settings.sort_mode.custom']()}</Select.Item>
-				</Select.Content>
-			</Select.Root>
-		</div>
-
-		{#if teamWorkflowOverride.mode === 'custom'}
-			<div class="border-t border-[var(--app-border)]"></div>
-			<div class="px-5 py-4">
-				<p class="mb-2 text-xs text-[var(--color-text-tertiary)]">{m['team_settings.custom_category_order']()}</p>
-				<div class="space-y-1">
-					{#each teamWorkflowOrder as category, index (category)}
-						<!-- svelte-ignore a11y_no_static_element_interactions -->
-						<div
-							animate:flip={{ duration: 180 }}
-							class="group relative flex items-center justify-between rounded-md border border-[var(--app-border)] bg-[var(--color-bg)] px-2 py-2 transition-[background-color,border-color,box-shadow,opacity,scale] duration-200 ease-out hover:border-[var(--app-accent)]/40 hover:bg-[var(--color-bg-hover)]/40 hover:shadow-sm {workflowDragCategory ===
-							category
-								? 'scale-[0.99] opacity-70'
-								: ''}"
-							draggable="true"
-							ondragstart={(e) => handleWorkflowDragStart(e, category)}
-							ondragover={(e) => handleWorkflowDragOver(e, category)}
-							ondragleave={() => (workflowDragOverCategory = null)}
-							ondragend={handleWorkflowDragEnd}
-							ondrop={(e) => handleWorkflowDrop(e, category)}
-						>
-							{#if workflowDragOverCategory === category && workflowDragCategory !== category}
-								<div
-									class="absolute {workflowDropIndicator === 'above'
-										? '-top-1'
-										: '-bottom-1'} left-2 right-2 h-0.5 rounded-full bg-[var(--app-accent)] shadow-[0_0_12px_var(--app-accent)] transition-all"
-								></div>
-							{/if}
-							<div class="flex items-center gap-2">
-								<span
-									class="cursor-grab rounded p-1 text-[var(--color-text-tertiary)] transition-colors group-hover:text-[var(--color-text-secondary)] active:cursor-grabbing"
-								>
-									<GripVertical size={14} />
-								</span>
-								<span
-									class="text-sm text-[var(--color-text-primary)] transition-colors group-hover:text-[var(--color-text-primary)]"
-									>{getCategoryLabel(category)}</span
-								>
-							</div>
-							<div
-								class="flex items-center gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
-							>
-								<button
-									onclick={() => moveTeamWorkflowCategory(category, -1)}
-									disabled={index === 0}
-									class="rounded p-1 text-[var(--color-text-tertiary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)] disabled:opacity-30"
-									aria-label={m['team_settings.move_category_up_aria']({ name: getCategoryLabel(category) })}
-								>
-									<ArrowUp size={13} />
-								</button>
-								<button
-									onclick={() => moveTeamWorkflowCategory(category, 1)}
-									disabled={index === teamWorkflowOrder.length - 1}
-									class="rounded p-1 text-[var(--color-text-tertiary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)] disabled:opacity-30"
-									aria-label={m['team_settings.move_category_down_aria']({ name: getCategoryLabel(category) })}
-								>
-									<ArrowDown size={13} />
-								</button>
-							</div>
-						</div>
-					{/each}
-				</div>
-			</div>
-		{/if}
-	</div>
 
 	<div class="mt-8">
 		{#if loading}
@@ -405,7 +286,7 @@
 							<button
 								onclick={() => startAdd(cat)}
 								class="rounded p-0.5 text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors"
-								title={m['team_settings.add_status_to_aria']({ name: getCategoryLabel(cat) })}
+								title={m['settings.statuses.add_status_to_aria']({ name: getCategoryLabel(cat) })}
 							>
 								<Plus size={14} />
 							</button>
@@ -461,7 +342,7 @@
 															? 'ring-2 ring-[var(--app-accent)] ring-offset-1 ring-offset-[var(--color-bg)]'
 															: ''}"
 														style="background-color: {c}"
-														aria-label={m['team_settings.select_color_aria']({ color: c })}
+														aria-label={m['settings.statuses.select_color_aria']({ color: c })}
 													></button>
 												{/each}
 											</div>
@@ -483,11 +364,59 @@
 											<div class="flex items-center gap-2">
 												<span class="text-sm font-medium text-[var(--color-text-primary)]">{status.name}</span>
 												{#if status.is_default}
-													<span class="text-[10px] text-[var(--color-text-tertiary)]">· {m['team_settings.default_badge']()}</span>
+													<span class="text-[10px] text-[var(--color-text-tertiary)]">· {m['settings.statuses.default_badge']()}</span>
 												{/if}
 											</div>
+											<button
+												type="button"
+												onclick={() => (visibilityOpenId = visibilityOpenId === status.id ? null : status.id)}
+												class="mt-0.5 flex items-center gap-1 text-[11px] text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] transition-colors"
+											>
+												<Globe size={11} />
+												{visibilityLabel(status)}
+											</button>
 										</div>
 										<div class="flex items-center gap-1">
+											<Popover.Root open={visibilityOpenId === status.id} onOpenChange={(open) => (visibilityOpenId = open ? status.id : null)}>
+												<Popover.Trigger>
+													<button
+														class="hidden rounded p-1 text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-tertiary)] group-hover:block transition-colors"
+														title={m['settings.statuses.visibility']()}
+													>
+														<FolderKanban size={12} />
+													</button>
+												</Popover.Trigger>
+												<Popover.Content class="w-56 p-2" align="end">
+													<p class="px-1 pb-1.5 text-[11px] font-medium uppercase tracking-wide text-[var(--color-text-tertiary)]">
+														{m['settings.statuses.visibility']}
+													</p>
+													<button
+														onclick={() => showAllProjects(status)}
+														class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]"
+													>
+														<Globe size={13} class="text-[var(--color-text-tertiary)]" />
+														{m['settings.statuses.visible_all_projects']()}
+													</button>
+													<div class="my-1 h-px bg-[var(--app-border)]"></div>
+													{#if projects.length === 0}
+														<p class="px-2 py-1.5 text-xs text-[var(--color-text-tertiary)]">
+															{m['settings.statuses.no_projects']()}
+														</p>
+													{:else}
+														<div class="max-h-56 space-y-px overflow-y-auto">
+															{#each projects as project (project.id)}
+																<button
+																	onclick={() => toggleProjectVisibility(status, project.id)}
+																	class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]"
+																>
+																	<Checkbox checked={visibleProjectIds(status).has(project.id)} />
+																	<span class="truncate">{project.name}</span>
+																</button>
+															{/each}
+														</div>
+													{/if}
+												</Popover.Content>
+											</Popover.Root>
 											<button
 												onclick={() => startEdit(status)}
 												class="hidden rounded p-1 text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-tertiary)] group-hover:block transition-colors"
@@ -516,7 +445,7 @@
 								<input
 									type="text"
 									bind:value={addName}
-									placeholder={m['team_settings.status_name_placeholder']()}
+									placeholder={m['settings.statuses.name_placeholder']()}
 									onkeydown={(e) => {
 										if (e.key === 'Enter') handleAdd();
 										if (e.key === 'Escape') addingCategory = null;
@@ -531,7 +460,7 @@
 												? 'ring-2 ring-[var(--app-accent)] ring-offset-1 ring-offset-[var(--color-bg)]'
 												: ''}"
 											style="background-color: {c}"
-											aria-label={m['team_settings.select_color_only_aria']()}
+											aria-label={m['settings.statuses.select_color_only_aria']()}
 										></button>
 									{/each}
 								</div>
@@ -540,7 +469,7 @@
 									disabled={!addName.trim()}
 									class="rounded-md bg-[var(--app-accent)] px-2.5 py-1 text-xs text-[var(--app-accent-foreground)] hover:bg-[var(--app-accent-hover)] disabled:opacity-50"
 								>
-									{m['team_settings.add']()}
+									{m['settings.statuses.add']()}
 								</button>
 								<button
 									onclick={() => (addingCategory = null)}

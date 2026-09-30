@@ -4,7 +4,7 @@
 	import { getIssue } from '$lib/api/issues';
 	import type { Issue } from '$lib/types/issue';
 	import { issuesState } from '$lib/features/issues/issues.state.svelte';
-	import { teamStatusesState } from '$lib/features/issues/team-statuses.state.svelte';
+	import { statusesState } from '$lib/features/issues/statuses.state.svelte';
 	import FullPageIssueView from '$lib/features/issues/FullPageIssueView.svelte';
 
 	const slug = $derived(page.params.workspaceSlug ?? '');
@@ -25,10 +25,10 @@
 			getIssue(slug, identifier).then((i) => {
 				if (currentRequest !== requestId) return;
 				issue = i;
-				// Load team issues for prev/next navigation if not already loaded
-				if (issuesState.issues.length === 0 && i.team_id) {
-					teamStatusesState.reload(slug, i.team_id);
-					issuesState.load(slug, { team: i.team_id });
+				// Load workspace issues for prev/next navigation if not already loaded
+				if (issuesState.issues.length === 0) {
+					statusesState.reload(slug);
+					issuesState.load(slug, {});
 				}
 			});
 		}

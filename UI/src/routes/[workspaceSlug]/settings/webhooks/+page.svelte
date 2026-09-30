@@ -32,7 +32,6 @@
 		'issue.deleted',
 		'issue.triaged',
 		'comment.created',
-		'cycle.completed',
 		'project.updated'
 	];
 

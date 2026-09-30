@@ -6,16 +6,14 @@
 	import { listIssues } from '$lib/api/issues';
 	import { listMembers } from '$lib/api/members';
 	import { listLabels } from '$lib/api/labels';
-	import { listTeams } from '$lib/api/teams';
 	import { listProjects } from '$lib/api/projects';
-	import { teamStatusesState } from '$lib/features/issues/team-statuses.state.svelte';
+	import { statusesState } from '$lib/features/issues/statuses.state.svelte';
 	import { authState } from '$lib/features/auth/auth.state.svelte';
 	import type { View, ViewFilter } from '$lib/types/view';
 	import { issueFilters, viewMetadata } from '$lib/types/view';
 	import type { Issue } from '$lib/types/issue';
 	import type { WorkspaceMember } from '$lib/types/workspace';
 	import type { Label } from '$lib/types/label';
-	import type { Team } from '$lib/types/team';
 	import type { Project } from '$lib/types/project';
 	import IssueTreeItem from '$lib/features/issues/IssueTreeItem.svelte';
 	import { issuesState } from '$lib/features/issues/issues.state.svelte';
@@ -40,7 +38,6 @@
 	let issues = $state<Issue[]>([]);
 	let members = $state<WorkspaceMember[]>([]);
 	let labels = $state<Label[]>([]);
-	let teams = $state<Team[]>([]);
 	let projects = $state<Project[]>([]);
 
 	const isOwner = $derived(!!authState.user && !!view && authState.user.id === view.creator_id);
@@ -65,12 +62,11 @@
 		const v = viewId;
 		if (!s || !v) return;
 		loading = true;
-		Promise.all([getView(s, v), listMembers(s), listLabels(s), listTeams(s), listProjects(s)])
-			.then(async ([viewData, m, l, t, p]) => {
+		Promise.all([getView(s, v), listMembers(s), listLabels(s), listProjects(s)])
+			.then(async ([viewData, m, l, p]) => {
 				view = viewData;
 				members = m;
 				labels = l;
-				teams = t;
 				projects = p;
 				filters = issueFilters(viewData.filters);
 				await loadIssues();
@@ -92,16 +88,14 @@
 		try {
 			const res = await listIssues(slug, params);
 			issues = res.data;
-			await loadTeamStatuses();
+			await loadStatuses();
 		} catch {
 			issues = [];
 		}
 	}
 
-	async function loadTeamStatuses() {
-		const teamId = filters.team || issues[0]?.team_id || teams[0]?.id;
-		if (!teamId || !filters.status) return;
-		await teamStatusesState.load(slug, teamId);
+	async function loadStatuses() {
+		await statusesState.load(slug);
 	}
 
 	function startEditName() {
@@ -271,7 +265,6 @@
 		<div class="border-b border-[var(--app-border)]">
 			<FilterBuilder
 				bind:filters
-				{teams}
 				{projects}
 				{labels}
 				{members}

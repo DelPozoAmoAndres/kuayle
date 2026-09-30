@@ -43,10 +43,6 @@ func (s *IssueTemplateService) Create(ctx context.Context, workspaceID, creatorI
 		CreatedBy:      creatorID,
 	}
 
-	if req.TeamID != nil {
-		tid, _ := uuid.Parse(*req.TeamID)
-		tmpl.TeamID = &tid
-	}
 	if req.AssigneeID != nil {
 		aid, _ := uuid.Parse(*req.AssigneeID)
 		tmpl.AssigneeID = &aid
@@ -83,10 +79,6 @@ func (s *IssueTemplateService) Update(ctx context.Context, id uuid.UUID, req dto
 	}
 	if req.Priority != nil {
 		tmpl.Priority = req.Priority
-	}
-	if req.TeamID != nil {
-		tid, _ := uuid.Parse(*req.TeamID)
-		tmpl.TeamID = &tid
 	}
 	if req.AssigneeID != nil {
 		aid, _ := uuid.Parse(*req.AssigneeID)

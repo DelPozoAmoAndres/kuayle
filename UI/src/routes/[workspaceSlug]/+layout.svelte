@@ -4,14 +4,12 @@
 	import { goto } from '$app/navigation';
 	import { authState } from '$lib/features/auth/auth.state.svelte';
 	import { getWorkspace } from '$lib/api/workspaces';
-	import { listTeams, createTeam, deleteTeam, leaveTeam } from '$lib/api/teams';
 	import { listProjects } from '$lib/api/projects';
 	import { listLabels } from '$lib/api/labels';
 	import { listMembers } from '$lib/api/members';
 	import { listViews } from '$lib/api/views';
 	import { listNotifications } from '$lib/api/notifications';
 	import type { Workspace } from '$lib/types/workspace';
-	import type { Team } from '$lib/types/team';
 	import type { Project } from '$lib/types/project';
 	import type { Label } from '$lib/types/label';
 	import type { WorkspaceMember } from '$lib/types/workspace';
@@ -20,8 +18,6 @@
 	import Sidebar from '$lib/components/layout/Sidebar.svelte';
 	import CommandPalette from '$lib/components/layout/CommandPalette.svelte';
 	import CreateIssueDialog from '$lib/features/issues/CreateIssueDialog.svelte';
-	import CreateTeamDialog from '$lib/features/teams/CreateTeamDialog.svelte';
-	import * as Dialog from '$lib/components/ui/dialog';
 	import ShortcutHelp from '$lib/components/shared/ShortcutHelp.svelte';
 	import * as Sheet from '$lib/components/ui/sheet';
 	import { Button } from '$lib/components/ui/button';
@@ -29,7 +25,7 @@
 	import { issuesState } from '$lib/features/issues/issues.state.svelte';
 	import { showIssueCreatedToast } from '$lib/features/issues/issue-created-toast';
 	import { preferencesState } from '$lib/features/preferences/preferences.state.svelte';
-	import { teamStatusesState } from '$lib/features/issues/team-statuses.state.svelte';
+	import { statusesState } from '$lib/features/issues/statuses.state.svelte';
 	import { sidebarState } from '$lib/features/layout/sidebar.state.svelte';
 	import { createShortcutEngine, type ShortcutDef } from '$lib/utils/keyboard';
 	import { Menu, Search, SquarePen } from 'lucide-svelte';
@@ -41,7 +37,6 @@
 
 	let { children } = $props();
 	let workspace = $state<Workspace | null>(null);
-	let teams = $state<Team[]>([]);
 	let projects = $state<Project[]>([]);
 	let labels = $state<Label[]>([]);
 	let members = $state<WorkspaceMember[]>([]);
@@ -49,13 +44,8 @@
 	let unreadCount = $state(0);
 	let showCommandPalette = $state(false);
 	let showCreateIssue = $state(false);
-	let showCreateTeam = $state(false);
 	let showShortcutHelp = $state(false);
 	let showMobileSidebar = $state(false);
-	let confirmTeam = $state<Team | null>(null);
-	let confirmAction = $state<'leave' | 'delete' | null>(null);
-	let confirmOpen = $state(false);
-	let confirmSubmitting = $state(false);
 	let authReady = $state(false);
 	let workspaceLoadId = 0;
 	const isMobile = new IsMobile();
@@ -69,22 +59,27 @@
 
 	async function loadWorkspaceData(workspaceSlug: string) {
 		const loadId = ++workspaceLoadId;
-		try {
-			const workspaceRequest = getWorkspace(workspaceSlug);
-			const teamsRequest = listTeams(workspaceSlug);
-			const renderRequest = Promise.all([workspaceRequest, teamsRequest]).then(([ws, t]) => {
+		// Only a failure on the workspace itself (not authenticated / not a member)
+		// should send the user back to login. A transient failure loading labels,
+		// members, views... must never kick an invited member out of the app.
+		const renderRequest = getWorkspace(workspaceSlug).then(
+			(ws) => {
 				if (loadId !== workspaceLoadId) return;
 				workspace = ws;
-				teams = t;
-				sidebarState.teams = t;
-			});
-			const navigationRequest = Promise.all([
-				listProjects(workspaceSlug),
-				listLabels(workspaceSlug),
-				listMembers(workspaceSlug),
-				listViews(workspaceSlug),
-				listNotifications()
-			]).then(([p, l, m, v, notifRes]) => {
+			},
+			(error) => {
+				if (loadId === workspaceLoadId) goto('/login');
+				throw error;
+			}
+		);
+		const navigationRequest = Promise.all([
+			listProjects(workspaceSlug),
+			listLabels(workspaceSlug),
+			listMembers(workspaceSlug),
+			listViews(workspaceSlug),
+			listNotifications()
+		])
+			.then(([p, l, m, v, notifRes]) => {
 				if (loadId !== workspaceLoadId) return;
 				projects = p;
 				sidebarState.projects = p;
@@ -92,11 +87,13 @@
 				members = m;
 				views = v;
 				unreadCount = notifRes.unread_count;
+			})
+			.catch(() => {
+				// Keep whatever navigation data we already had.
 			});
-			await Promise.all([renderRequest, navigationRequest]);
-		} catch {
-			if (loadId === workspaceLoadId) goto('/login');
-		}
+		await Promise.all([renderRequest, navigationRequest]).catch(() => {});
+		// Workspace statuses are shared across the whole app: load them once.
+		void statusesState.load(workspaceSlug).catch(() => {});
 	}
 
 	async function reloadViews(workspaceSlug: string) {
@@ -124,12 +121,6 @@
 		}
 		if (resources.includes('workspace')) {
 			getWorkspace(slug).then((ws) => { workspace = ws; }).catch(() => {});
-		}
-		if (resources.includes('teams')) {
-			listTeams(slug).then((t) => {
-				teams = t;
-				sidebarState.teams = t;
-			}).catch(() => {});
 		}
 		if (resources.includes('projects')) {
 			listProjects(slug).then((p) => {
@@ -167,12 +158,10 @@
 		if (authReady && slug && slug !== loadedSlug) {
 			loadedSlug = slug;
 			workspace = null;
-			teams = [];
 			projects = [];
 			labels = [];
 			members = [];
 			views = [];
-			sidebarState.teams = [];
 			sidebarState.projects = [];
 			void loadWorkspaceData(slug);
 		}
@@ -190,16 +179,9 @@
 		{
 			key: 'c',
 			handler: () => {
-				if (teams.length === 0) {
-					showCreateTeam = true;
-				} else {
-					// Ensure statuses are loaded for the target team
-					const targetTeam = getCreateTeamId();
-					if (targetTeam) {
-						teamStatusesState.load(slug, targetTeam);
-					}
-					showCreateIssue = true;
-				}
+				// Ensure workspace statuses are loaded
+				void statusesState.load(slug);
+				showCreateIssue = true;
 			},
 			label: m['sidebar.create_issue'](),
 			category: m['sidebar.actions']()
@@ -220,75 +202,9 @@
 		};
 	});
 
-	async function handleCreateTeam(data: { name: string; key: string; description?: string }) {
-		try {
-			const team = await createTeam(slug, data);
-			teams = [...teams, team];
-			sidebarState.teams = teams;
-			appToast.success(m['sidebar.team_created']());
-		} catch (err: any) {
-			appToast.apiError(err, m['sidebar.failed_create_team']());
-		}
-	}
-
-	function removeTeamFromState(teamId: string) {
-		teams = teams.filter((team) => team.id !== teamId);
-		sidebarState.teams = teams;
-
-		const teamPath = `/${slug}/teams/${teamId}`;
-		const settingsPath = `/${slug}/settings/teams/${teamId}`;
-		if (page.url.pathname.startsWith(teamPath) || page.url.pathname.startsWith(settingsPath)) {
-			goto(`/${slug}/my-issues`);
-		}
-	}
-
-	function openTeamConfirm(team: Team, action: 'leave' | 'delete') {
-		confirmTeam = team;
-		confirmAction = action;
-		confirmOpen = true;
-	}
-
-	function handleLeaveTeam(team: Team) {
-		openTeamConfirm(team, 'leave');
-	}
-
-	function handleDeleteTeam(team: Team) {
-		openTeamConfirm(team, 'delete');
-	}
-
-	async function confirmTeamAction() {
-		if (!confirmTeam || !confirmAction) return;
-		confirmSubmitting = true;
-		try {
-			if (confirmAction === 'leave') {
-				const result = await leaveTeam(slug, confirmTeam.id);
-				removeTeamFromState(confirmTeam.id);
-				appToast.success(result.status === 'deleted' ? m['sidebar.team_deleted']() : m['sidebar.left_team']());
-			} else {
-				await deleteTeam(slug, confirmTeam.id);
-				removeTeamFromState(confirmTeam.id);
-				appToast.success(m['sidebar.team_deleted']());
-			}
-			confirmOpen = false;
-			confirmTeam = null;
-			confirmAction = null;
-		} catch (err: any) {
-			appToast.apiError(err, confirmAction === 'leave' ? m['sidebar.failed_leave_team']() : m['sidebar.failed_delete_team']());
-		} finally {
-			confirmSubmitting = false;
-		}
-	}
-
 	function openCreateIssue() {
-		if (teams.length === 0) {
-			showCreateTeam = true;
-		} else {
-			const targetTeam = getCreateTeamId();
-			if (targetTeam) {
-				teamStatusesState.load(slug, targetTeam);
-			}
-			showCreateIssue = true;
-		}
+		void statusesState.load(slug);
+		showCreateIssue = true;
 		showMobileSidebar = false;
 	}
 
@@ -300,25 +216,17 @@
 
 	function getActiveIssueFilters(): Record<string, string> {
 		const pathname = page.url.pathname;
-		const teamPath = page.params.teamId ? `/${slug}/teams/${page.params.teamId}` : '';
 		const projectPath = page.params.projectId ? `/${slug}/projects/${page.params.projectId}` : '';
 
 		if (pathname === `/${slug}/my-issues`) return issuesState.filters;
-		if (teamPath && (pathname === teamPath || pathname === `${teamPath}/board`)) return issuesState.filters;
 		if (projectPath && pathname === projectPath) return issuesState.filters;
 		return {};
-	}
-
-	function getCreateTeamId(): string | undefined {
-		const activeFilters = getActiveIssueFilters();
-		const routeProject = projects.find((project) => project.id === page.params.projectId);
-		return page.params.teamId ?? routeProject?.team_id ?? singleFilterValue(activeFilters.team) ?? teams[0]?.id;
 	}
 
 	function getCreateStatusId(): string | undefined {
 		const value = singleFilterValue(getActiveIssueFilters().status);
 		if (!value) return undefined;
-		return teamStatusesState.statusById.get(value)?.id ?? teamStatusesState.statusOrder.find((status) => status.slug === value)?.id;
+		return statusesState.statusById.get(value)?.id ?? statusesState.statusOrder.find((status) => status.slug === value)?.id;
 	}
 
 	function getCreatePriority(): IssuePriority | undefined {
@@ -443,6 +351,14 @@
 				window.dispatchEvent(new CustomEvent('ws:comment-created', { detail: msg.payload }));
 				break;
 			}
+			case 'comment.updated': {
+				window.dispatchEvent(new CustomEvent('ws:comment-updated', { detail: msg.payload }));
+				break;
+			}
+			case 'comment.deleted': {
+				window.dispatchEvent(new CustomEvent('ws:comment-deleted', { detail: msg.payload }));
+				break;
+			}
 			case 'view.created':
 			case 'view.updated':
 			case 'view.deleted': {
@@ -483,15 +399,11 @@
 			<div class="hidden md:contents">
 				<Sidebar
 					{workspace}
-					{teams}
 					{views}
 					{projects}
 					{unreadCount}
 					{slug}
 					oncreateissue={openCreateIssue}
-					oncreateteam={() => (showCreateTeam = true)}
-					onleaveteam={handleLeaveTeam}
-					ondeleteteam={handleDeleteTeam}
 					onsearch={() => (showCommandPalette = true)}
 					onshortcutshelp={() => (showShortcutHelp = true)}
 				/>
@@ -505,20 +417,16 @@
 					</Sheet.Header>
 					<Sidebar
 						{workspace}
-						{teams}
 						{views}
 						{projects}
 						{unreadCount}
 						{slug}
 						mobile
 						oncreateissue={openCreateIssue}
-						oncreateteam={() => { showCreateTeam = true; showMobileSidebar = false; }}
-						onleaveteam={(team) => { showMobileSidebar = false; handleLeaveTeam(team); }}
-						ondeleteteam={(team) => { showMobileSidebar = false; handleDeleteTeam(team); }}
-					onsearch={() => { showCommandPalette = true; showMobileSidebar = false; }}
-					onnavigate={() => (showMobileSidebar = false)}
-					onshortcutshelp={() => { showMobileSidebar = false; showShortcutHelp = true; }}
-				/>
+						onsearch={() => { showCommandPalette = true; showMobileSidebar = false; }}
+						onnavigate={() => (showMobileSidebar = false)}
+						onshortcutshelp={() => { showMobileSidebar = false; showShortcutHelp = true; }}
+					/>
 				</Sheet.Content>
 			</Sheet.Root>
 		{/if}
@@ -549,17 +457,15 @@
 	</div>
 
 	{#if showCommandPalette}
-		<CommandPalette {slug} {teams} onclose={() => (showCommandPalette = false)} oncreateissue={openCreateIssue} />
+		<CommandPalette {slug} onclose={() => (showCommandPalette = false)} oncreateissue={openCreateIssue} />
 	{/if}
 
 	<CreateIssueDialog
 		bind:open={showCreateIssue}
 		{slug}
-		{teams}
 		{projects}
 		{labels}
 		{members}
-		defaultTeamId={getCreateTeamId()}
 		defaultStatusId={getCreateStatusId()}
 		defaultPriority={getCreatePriority()}
 		defaultProjectId={getCreateProjectId()}
@@ -575,34 +481,6 @@
 			}
 		}}
 	/>
-
-	<CreateTeamDialog
-		bind:open={showCreateTeam}
-		onsubmit={handleCreateTeam}
-	/>
-
-	<Dialog.Root bind:open={confirmOpen}>
-		<Dialog.Content class="sm:max-w-[420px] border-[var(--app-border)] bg-[var(--color-bg-secondary)]">
-			<Dialog.Header>
-				<Dialog.Title>
-					{confirmAction === 'delete' ? m['sidebar.delete_team_title']() : m['sidebar.leave_team_title']()}
-				</Dialog.Title>
-				<Dialog.Description>
-					{#if confirmAction === 'delete'}
-						{m['sidebar.delete_team_desc']({ name: confirmTeam?.name ?? m['sidebar.this_team']() })}
-					{:else}
-						{m['sidebar.leave_team_desc']({ name: confirmTeam?.name ?? m['sidebar.this_team']() })}
-					{/if}
-				</Dialog.Description>
-			</Dialog.Header>
-			<Dialog.Footer>
-				<Button variant="outline" onclick={() => (confirmOpen = false)} disabled={confirmSubmitting}>{m['sidebar.cancel']()}</Button>
-				<Button variant="destructive" onclick={confirmTeamAction} disabled={confirmSubmitting}>
-					{confirmSubmitting ? m['sidebar.working']() : confirmAction === 'delete' ? m['sidebar.delete_team_title']() : m['sidebar.leave_team_title']()}
-				</Button>
-			</Dialog.Footer>
-		</Dialog.Content>
-	</Dialog.Root>
 
 	<ShortcutHelp
 		bind:open={showShortcutHelp}

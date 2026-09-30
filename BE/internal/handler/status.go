@@ -3,32 +3,28 @@ package handler
 import (
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/kuayle/kuayle-backend/internal/domain"
 	"github.com/kuayle/kuayle-backend/internal/dto"
 	"github.com/kuayle/kuayle-backend/internal/service"
 	"github.com/kuayle/kuayle-backend/pkg/response"
 	"github.com/kuayle/kuayle-backend/pkg/validate"
-	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 )
 
-type TeamStatusHandler struct {
-	statusSvc *service.TeamStatusService
+type StatusHandler struct {
+	statusSvc *service.StatusService
 }
 
-func NewTeamStatusHandler(statusSvc *service.TeamStatusService) *TeamStatusHandler {
-	return &TeamStatusHandler{statusSvc: statusSvc}
+func NewStatusHandler(statusSvc *service.StatusService) *StatusHandler {
+	return &StatusHandler{statusSvc: statusSvc}
 }
 
-func (h *TeamStatusHandler) List(c echo.Context) error {
-	teamIDStr := c.Param("teamId")
-	teamID, err := uuid.Parse(teamIDStr)
-	if err != nil {
-		return response.Error(c, http.StatusBadRequest, "BAD_REQUEST", "Invalid team ID")
-	}
+func (h *StatusHandler) List(c echo.Context) error {
+	ws := c.Get("workspace").(*domain.Workspace)
 
 	ctx := c.Request().Context()
-	statuses, err := h.statusSvc.List(ctx, teamID)
+	statuses, err := h.statusSvc.List(ctx, ws.ID)
 	if err != nil {
 		return response.InternalError(c)
 	}
@@ -40,9 +36,9 @@ func (h *TeamStatusHandler) List(c echo.Context) error {
 	}
 	projectIDsMap, _ := h.statusSvc.ListProjectIDsForStatuses(ctx, statusIDs)
 
-	resp := make([]dto.TeamStatusResponse, len(statuses))
+	resp := make([]dto.StatusResponse, len(statuses))
 	for i, s := range statuses {
-		resp[i] = toTeamStatusResponse(s)
+		resp[i] = toStatusResponse(s)
 		if pids, ok := projectIDsMap[s.ID]; ok && len(pids) > 0 {
 			pidStrs := make([]string, len(pids))
 			for j, pid := range pids {
@@ -54,8 +50,8 @@ func (h *TeamStatusHandler) List(c echo.Context) error {
 	return response.Success(c, http.StatusOK, resp)
 }
 
-func (h *TeamStatusHandler) Create(c echo.Context) error {
-	var req dto.CreateTeamStatusRequest
+func (h *StatusHandler) Create(c echo.Context) error {
+	var req dto.CreateStatusRequest
 	if err := c.Bind(&req); err != nil {
 		return response.Error(c, http.StatusBadRequest, "BAD_REQUEST", "Invalid request body")
 	}
@@ -67,18 +63,14 @@ func (h *TeamStatusHandler) Create(c echo.Context) error {
 		return response.ValidationError(c, details)
 	}
 
-	teamIDStr := c.Param("teamId")
-	teamID, err := uuid.Parse(teamIDStr)
-	if err != nil {
-		return response.Error(c, http.StatusBadRequest, "BAD_REQUEST", "Invalid team ID")
-	}
+	ws := c.Get("workspace").(*domain.Workspace)
 
 	ctx := c.Request().Context()
-	status, err := h.statusSvc.Create(ctx, teamID, req)
+	status, err := h.statusSvc.Create(ctx, ws.ID, req)
 	if err != nil {
 		return response.Error(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	}
-	resp := toTeamStatusResponse(*status)
+	resp := toStatusResponse(*status)
 	if pids, _ := h.statusSvc.ListProjectsForStatus(ctx, status.ID); len(pids) > 0 {
 		pidStrs := make([]string, len(pids))
 		for i, pid := range pids {
@@ -89,8 +81,8 @@ func (h *TeamStatusHandler) Create(c echo.Context) error {
 	return response.Success(c, http.StatusCreated, resp)
 }
 
-func (h *TeamStatusHandler) Update(c echo.Context) error {
-	var req dto.UpdateTeamStatusRequest
+func (h *StatusHandler) Update(c echo.Context) error {
+	var req dto.UpdateStatusRequest
 	if err := c.Bind(&req); err != nil {
 		return response.Error(c, http.StatusBadRequest, "BAD_REQUEST", "Invalid request body")
 	}
@@ -101,12 +93,13 @@ func (h *TeamStatusHandler) Update(c echo.Context) error {
 		return response.Error(c, http.StatusBadRequest, "BAD_REQUEST", "Invalid status ID")
 	}
 
+	ws := c.Get("workspace").(*domain.Workspace)
 	ctx := c.Request().Context()
-	status, err := h.statusSvc.Update(ctx, id, req)
+	status, err := h.statusSvc.Update(ctx, ws.ID, id, req)
 	if err != nil {
 		return response.Error(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	}
-	resp := toTeamStatusResponse(*status)
+	resp := toStatusResponse(*status)
 	if pids, _ := h.statusSvc.ListProjectsForStatus(ctx, status.ID); len(pids) > 0 {
 		pidStrs := make([]string, len(pids))
 		for i, pid := range pids {
@@ -117,30 +110,31 @@ func (h *TeamStatusHandler) Update(c echo.Context) error {
 	return response.Success(c, http.StatusOK, resp)
 }
 
-func (h *TeamStatusHandler) Delete(c echo.Context) error {
+func (h *StatusHandler) Delete(c echo.Context) error {
 	idStr := c.Param("statusId")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
 		return response.Error(c, http.StatusBadRequest, "BAD_REQUEST", "Invalid status ID")
 	}
 
-	if err := h.statusSvc.Delete(c.Request().Context(), id); err != nil {
+	ws := c.Get("workspace").(*domain.Workspace)
+	if err := h.statusSvc.Delete(c.Request().Context(), ws.ID, id); err != nil {
 		return response.Error(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	}
 	return response.Success(c, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
-func toTeamStatusResponse(s domain.TeamStatus) dto.TeamStatusResponse {
-	return dto.TeamStatusResponse{
-		ID:        s.ID.String(),
-		TeamID:    s.TeamID.String(),
-		Name:      s.Name,
-		Slug:      s.Slug,
-		Category:  string(s.Category),
-		Color:     s.Color,
-		Position:  s.Position,
-		IsDefault: s.IsDefault,
-		CreatedAt: s.CreatedAt,
-		UpdatedAt: s.UpdatedAt,
+func toStatusResponse(s domain.WorkspaceStatus) dto.StatusResponse {
+	return dto.StatusResponse{
+		ID:          s.ID.String(),
+		WorkspaceID: s.WorkspaceID.String(),
+		Name:        s.Name,
+		Slug:        s.Slug,
+		Category:    string(s.Category),
+		Color:       s.Color,
+		Position:    s.Position,
+		IsDefault:   s.IsDefault,
+		CreatedAt:   s.CreatedAt,
+		UpdatedAt:   s.UpdatedAt,
 	}
 }

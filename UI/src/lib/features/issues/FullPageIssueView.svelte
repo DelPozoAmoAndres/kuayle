@@ -4,7 +4,7 @@
 	import { getLocale, setLocale } from '$lib/paraglide/runtime.js';
 	import type { Issue, Comment, IssueHistory, IssueStatus, IssuePriority, RelationType } from '$lib/types/issue';
 	import { getPriorityLabel } from '$lib/types/issue';
-	import { teamStatusesState } from './team-statuses.state.svelte';
+	import { statusesState } from './statuses.state.svelte';
 	import type { WorkspaceMember } from '$lib/types/workspace';
 	import type { Label } from '$lib/types/label';
 	import type { Project } from '$lib/types/project';
@@ -24,7 +24,7 @@
 	import * as ContextMenu from '$lib/components/ui/context-menu';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { Checkbox } from '$lib/components/ui/checkbox';
-	import { StatusSelector, PrioritySelector, AssigneeSelector, LabelSelector, ProjectSelector, CycleSelector, TeamSelector } from './selectors';
+	import { StatusSelector, PrioritySelector, AssigneeSelector, LabelSelector, ProjectSelector } from './selectors';
 	import { createKeyboardHandler } from '$lib/utils/keyboard';
 	import {
 		ChevronUp, ChevronDown, ChevronRight, Plus, CalendarDays,
@@ -33,21 +33,18 @@
 		Tag, RefreshCw, ArrowUp, MoreHorizontal, Check, Bell,
 		Trash2, CornerDownRight, Ban, ArrowRight
 	} from 'lucide-svelte';
-	import { listCycles } from '$lib/api/cycles';
-	import type { Cycle } from '$lib/types/cycle';
 	import IssueRelations from './IssueRelations.svelte';
 	import SubIssuesList from './SubIssuesList.svelte';
 	import IssueGitHubActivity from './IssueGitHubActivity.svelte';
 	import { goto } from '$app/navigation';
 	import { sanitizeHtml } from '$lib/security/sanitize';
+	import { projectPrefix } from '$lib/utils/project-prefix';
 	import { mentionInteractivity } from '$lib/components/shared/mention/mention-interactivity.action';
 	import { presenceState } from '$lib/features/presence/presence.state.svelte';
 	import CreateIssueDialog from './CreateIssueDialog.svelte';
 	import IssuePickerDialog from './IssuePickerDialog.svelte';
 	import AddRelationDialog from './AddRelationDialog.svelte';
 	import { showIssueCreatedToast } from './issue-created-toast';
-	import type { Team } from '$lib/types/team';
-	import { listTeams } from '$lib/api/teams';
 	import { getIssueCopyPrompt } from '$lib/api/ai-settings';
 	import HistoryAssignees from './HistoryAssignees.svelte';
 	import IssueMachineActions from '$lib/features/dev-machines/IssueMachineActions.svelte';
@@ -76,21 +73,19 @@
 	let projects = $state<Project[]>([]);
 	let newComment = $state('');
 	let commentVersion = $state(0);
+	let giteaLoginRequired = $state(false);
+	let replyGiteaRequired = $state<Record<string, boolean>>({});
 	let replyContents = $state<Record<string, string>>({});
 	let replyVersions = $state<Record<string, number>>({});
 	let editingTitle = $state(false);
 	let titleValue = $state('');
 	let statusOpen = $state(false);
 	let priorityOpen = $state(false);
-	let teamOpen = $state(false);
 	let assigneeOpen = $state(false);
 	let labelsOpen = $state(false);
-	let cycles = $state<Cycle[]>([]);
-	let cycleOpen = $state(false);
 	let projectOpen = $state(false);
 	let loaded = $state(false);
 	let showAllActivity = $state(false);
-	let teams = $state<Team[]>([]);
 	let showCreateIssueDialog = $state(false);
 	let createIssueTitle = $state('');
 	let createDialogParentIssue = $state<Issue | null>(null);
@@ -118,15 +113,12 @@
 	let detailsExpanded = $state(true);
 	let labelsExpanded = $state(true);
 	let projectExpanded = $state(true);
-	let cycleExpanded = $state(true);
 
 	const priorityValues: IssuePriority[] = [0, 1, 2, 3, 4];
 	const imageUploadUrl = $derived(`/api/workspaces/${slug}/upload`);
 
 	let issueProject = $derived(projects.find(p => p.id === issue.project_id));
-	let issueCycle = $derived(cycles.find(c => c.id === issue.cycle_id));
 	let currentParentPreview = $derived(parentDescriptionPreview(issue.parent?.description));
-	let issueTeam = $derived(teams.find(t => t.id === issue.team_id));
 
 	// Get remote cursors for a specific field from presence state
 	function getRemoteCursors(field: string) {
@@ -136,10 +128,8 @@
 	const newCommentViewers = $derived(presenceState.getViewersForField('new-comment'));
 
 	onMount(async () => {
-		// Load team statuses (needed on direct navigation / refresh)
-		if (issue.team_id) {
-			await teamStatusesState.load(slug, issue.team_id);
-		}
+		// Load workspace statuses (needed on direct navigation / refresh)
+		await statusesState.load(slug);
 
 		const [c, h, m, l, p] = await Promise.all([
 			listComments(slug, issue.identifier),
@@ -154,10 +144,6 @@
 		labels = l ?? [];
 		projects = p ?? [];
 		loaded = true;
-		if (issue.team_id) {
-			listCycles(slug, issue.team_id).then(c => cycles = c).catch(() => {});
-		}
-		listTeams(slug).then(t => teams = t).catch(() => {});
 
 		// Join presence AFTER members are loaded so names resolve correctly
 		presenceState.join(issue.id, m ?? []);
@@ -181,8 +167,8 @@
 	function onIssueDeleted(e: Event) {
 		const detail = (e as CustomEvent).detail;
 		if (matchesCurrentIssue(detail)) {
-			if (issue.team_id) {
-				goto(`/${slug}/teams/${issue.team_id}`);
+			if (issue.project_id) {
+				goto(`/${slug}/projects/${issue.project_id}`);
 			} else {
 				goto(`/${slug}/my-issues`);
 			}
@@ -194,6 +180,26 @@
 			refreshActivity();
 		}
 	}
+	function onCommentUpdated(e: Event) {
+		const detail = (e as CustomEvent).detail;
+		if (matchesCurrentIssue(detail)) {
+			refreshActivity();
+		}
+	}
+	function onCommentDeleted(e: Event) {
+		const detail = (e as CustomEvent).detail;
+		if (!matchesCurrentIssue(detail)) return;
+		if (detail?.comment_id) {
+			comments = removeCommentById(comments, detail.comment_id);
+		} else {
+			refreshActivity();
+		}
+	}
+	function removeCommentById(list: Comment[], commentId: string): Comment[] {
+		return list
+			.filter((c) => c.id !== commentId)
+			.map((c) => (c.replies && c.replies.length > 0 ? { ...c, replies: removeCommentById(c.replies, commentId) } : c));
+	}
 	function onPresenceJoin(e: Event) { presenceState.handleJoin((e as CustomEvent).detail); }
 	function onPresenceLeave(e: Event) { presenceState.handleLeave((e as CustomEvent).detail); }
 	function onPresenceSync(e: Event) { presenceState.handleSync((e as CustomEvent).detail); }
@@ -204,7 +210,6 @@
 	const issueKeyHandler = createKeyboardHandler([
 		{ key: 's', handler: () => { statusOpen = true; } },
 		{ key: 'p', handler: () => { priorityOpen = true; } },
-		{ key: 't', handler: () => { teamOpen = true; } },
 		{ key: 'a', handler: () => { assigneeOpen = true; } },
 		{ key: 'l', handler: () => { labelsOpen = true; } },
 	]);
@@ -214,6 +219,8 @@
 		window.addEventListener('ws:issue-updated', onIssueUpdated);
 		window.addEventListener('ws:issue-deleted', onIssueDeleted);
 		window.addEventListener('ws:comment-created', onCommentCreated);
+		window.addEventListener('ws:comment-updated', onCommentUpdated);
+		window.addEventListener('ws:comment-deleted', onCommentDeleted);
 		window.addEventListener('ws:presence.join', onPresenceJoin);
 		window.addEventListener('ws:presence.leave', onPresenceLeave);
 		window.addEventListener('ws:presence.sync', onPresenceSync);
@@ -233,6 +240,8 @@
 		window.removeEventListener('ws:issue-updated', onIssueUpdated);
 		window.removeEventListener('ws:issue-deleted', onIssueDeleted);
 		window.removeEventListener('ws:comment-created', onCommentCreated);
+		window.removeEventListener('ws:comment-updated', onCommentUpdated);
+		window.removeEventListener('ws:comment-deleted', onCommentDeleted);
 		window.removeEventListener('ws:presence.join', onPresenceJoin);
 		window.removeEventListener('ws:presence.leave', onPresenceLeave);
 		window.removeEventListener('ws:presence.sync', onPresenceSync);
@@ -379,11 +388,6 @@
 				const p = projects.find(p => p.id === value);
 				return p ? p.name : '-';
 			}
-			case 'cycle':
-			case 'cycle_id': {
-				const c = cycles.find(c => c.id === value);
-				return c ? c.name : '-';
-			}
 			case 'parent':
 			case 'parent_id':
 				return m['issue.history.unknown_issue']();
@@ -403,7 +407,6 @@
 			case 'due_date': return m['issue.history.due_date']();
 			case 'parent_id': return m['issue.history.parent']();
 			case 'project_id': return m['issue.history.project']();
-			case 'cycle_id': return m['issue.history.cycle']();
 			case 'status_id': return m['issue.history.status']();
 			default: return field;
 		}
@@ -418,7 +421,6 @@
 			case 'due_date': return CalendarDays;
 			case 'labels': return Tag;
 			case 'project': case 'project_id': return FolderKanban;
-			case 'cycle': case 'cycle_id': return RefreshCw;
 			case 'parent': case 'parent_id': return CornerDownRight;
 			default: return CircleDot;
 		}
@@ -432,11 +434,14 @@
 			case 'due_date': return 'text-red-400';
 			case 'labels': return 'text-teal-400';
 			case 'project': case 'project_id': return 'text-indigo-400';
-			case 'cycle': case 'cycle_id': return 'text-cyan-400';
 			case 'parent': case 'parent_id': return 'text-sky-400';
 			case 'title': case 'description': return 'text-[var(--color-text-tertiary)]';
 			default: return 'text-[var(--color-text-tertiary)]';
 		}
+	}
+
+	function isGiteaLoginRequired(err: unknown): boolean {
+		return (err as { error?: { code?: string } } | null)?.error?.code === 'GITEA_LOGIN_REQUIRED';
 	}
 
 	async function handleAddComment() {
@@ -445,10 +450,15 @@
 			lastLocalUpdate = Date.now();
 			await createComment(slug, issue.identifier, newComment);
 			newComment = '';
+			giteaLoginRequired = false;
 			commentVersion++;
 			refreshActivity();
 		} catch (err: any) {
-			appToast.apiError(err, m['issue.toast.failed_comment']());
+			if (isGiteaLoginRequired(err)) {
+				giteaLoginRequired = true;
+			} else {
+				appToast.apiError(err, m['issue.toast.failed_comment']());
+			}
 		}
 	}
 
@@ -460,9 +470,16 @@
 			replyContents[parentId] = '';
 			replyVersions[parentId] = (replyVersions[parentId] ?? 0) + 1;
 			replyVersions = { ...replyVersions };
+			replyGiteaRequired[parentId] = false;
+			replyGiteaRequired = { ...replyGiteaRequired };
 			refreshActivity();
 		} catch (err: any) {
-			appToast.apiError(err, m['issue.toast.failed_reply']());
+			if (isGiteaLoginRequired(err)) {
+				replyGiteaRequired[parentId] = true;
+				replyGiteaRequired = { ...replyGiteaRequired };
+			} else {
+				appToast.apiError(err, m['issue.toast.failed_reply']());
+			}
 		}
 	}
 
@@ -538,13 +555,11 @@
 
 	async function copyAIPrompt() {
 		try {
-			const [{ assets }, settings, copyTeams] = await Promise.all([
+			const [{ assets }, settings] = await Promise.all([
 				signIssuePromptAssets(slug, issue.identifier),
-				getIssueCopyPrompt(slug),
-				issueTeam ? Promise.resolve(teams) : listTeams(slug)
+				getIssueCopyPrompt(slug)
 			]);
-			if (!issueTeam) teams = copyTeams;
-			await navigator.clipboard.writeText(getAIPrompt(assets, settings.issue_copy_prompt, copyTeams.find(t => t.id === issue.team_id)));
+			await navigator.clipboard.writeText(getAIPrompt(assets, settings.issue_copy_prompt));
 			appToast.success(m['issue.toast.ai_prompt_copied']());
 		} catch (error) {
 			appToast.apiError(error, m['issue.toast.failed_ai_prompt']());
@@ -577,7 +592,7 @@
 		navigator.clipboard.writeText(branch);
 
 		// Move to "in progress" (started category)
-		const startedStatus = teamStatusesState.statuses.find(s => s.category === 'started');
+		const startedStatus = statusesState.statuses.find(s => s.category === 'started');
 		if (startedStatus && issue.status_id !== startedStatus.id) {
 			try {
 				await issuesState.update(slug, issue.identifier, { status_id: startedStatus.id });
@@ -688,22 +703,31 @@
 			.trim();
 	}
 
-	function applyIssueCopyTemplate(template: string, issueXml: string, teamKey: string, selectedTeam: Team | undefined): string {
+	function applyIssueCopyTemplate(template: string, issueXml: string, projectKey: string, projectName: string): string {
 		const values: Record<string, string> = {
 			issue_identifier: issue.identifier,
 			issue_title: decodeHtmlEntities(issue.title),
-			team_key: teamKey,
-			team_name: selectedTeam?.name ?? teamKey,
+			project_prefix: projectKey,
+			project_name: projectName,
+			// Legacy aliases (previously derived from the team), kept so existing templates still work
+			team_key: projectKey,
+			team_name: projectName,
 			issue_xml: issueXml
 		};
-		return template.replace(/{{\s*(issue_identifier|issue_title|team_key|team_name|issue_xml)\s*}}/g, (_, key) => values[key] ?? '');
+		return template.replace(
+			/{{\s*(issue_identifier|issue_title|project_prefix|project_name|team_key|team_name|issue_xml)\s*}}/g,
+			(_, key) => values[key] ?? ''
+		);
 	}
 
-	function getAIPrompt(signedAssets: Record<string, string> = {}, workspaceTemplate = '', selectedTeam = issueTeam): string {
+	function getAIPrompt(signedAssets: Record<string, string> = {}, workspaceTemplate = ''): string {
 		let issueXml = `<issue identifier="${issue.identifier}">\n`;
 		issueXml += `<title>${decodeHtmlEntities(issue.title)}</title>\n`;
-		const teamKey = issue.identifier.split('-')[0];
-		issueXml += `<team name="${teamKey}"/>\n`;
+		const projectKey = issueProject?.name
+			? projectPrefix(issueProject.name)
+			: issue.identifier.split('-')[0] || 'PRJ';
+		const projectName = issueProject?.name ?? projectKey;
+		issueXml += `<project_prefix value="${projectKey}"/>\n`;
 		if (issue.labels && issue.labels.length > 0) {
 			for (const l of issue.labels) {
 				issueXml += `<label>${decodeHtmlEntities(l.name)}</label>\n`;
@@ -716,8 +740,8 @@
 			issueXml += `<description>${htmlToPromptMarkdown(issue.description, signedAssets)}</description>\n`;
 		}
 		issueXml += `</issue>`;
-		const template = selectedTeam?.issue_copy_prompt?.trim() || workspaceTemplate.trim() || 'Work on issue {{issue_identifier}}:\n\n{{issue_xml}}';
-		return applyIssueCopyTemplate(template, issueXml, teamKey, selectedTeam);
+		const template = workspaceTemplate.trim() || 'Work on issue {{issue_identifier}}:\n\n{{issue_xml}}';
+		return applyIssueCopyTemplate(template, issueXml, projectKey, projectName);
 	}
 
 	function formatDueDate(dateStr: string): { label: string; colorClass: string } {
@@ -748,10 +772,10 @@
 	<div class="flex min-h-[49px] items-center justify-between gap-2 border-b border-[var(--app-border)] px-3 sm:px-4">
 		<div class="flex min-w-0 items-center gap-1.5 text-xs">
 			<a
-				href="/{slug}/teams/{issue.team_id}"
+				href={issue.project_id ? `/${slug}/projects/${issue.project_id}` : `/${slug}/projects`}
 				class="shrink-0 text-[var(--color-text-tertiary)] transition-colors hover:text-[var(--color-text-primary)]"
 			>
-				{issue.identifier.split('-')[0] ?? 'NOTEAM'}
+				{issue.identifier.split('-')[0]}
 			</a>
 			<span class="shrink-0 text-[var(--color-text-tertiary)]">&rsaquo;</span>
 			<span class="truncate font-medium text-[var(--color-text-primary)]">{issue.identifier}</span>
@@ -1116,14 +1140,23 @@
 				<div class="mt-4 space-y-3">
 					{#each comments as comment (comment.id)}
 						{@const replyViewers = presenceState.getViewersForField(`reply-${comment.id}`)}
+						{@const commentAuthor = comment.user?.name ?? comment.author_login ?? 'User'}
+						{@const commentAvatar = comment.user?.avatar_url ?? comment.author_avatar_url}
 						<div class="rounded-lg border border-[var(--app-border)] bg-[var(--color-bg-secondary)]">
 							<!-- Comment header + body -->
 							<div class="group/comment p-4">
 								<div class="flex items-center gap-2">
-									<div class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--app-accent)] text-[8px] font-medium text-[var(--app-accent-foreground)]">
-										{(comment.user?.name ?? 'U').charAt(0).toUpperCase()}
-									</div>
-									<span class="text-[13px] font-medium text-[var(--color-text-primary)]">{comment.user?.name ?? 'User'}</span>
+									{#if commentAvatar}
+										<img src={commentAvatar} alt="" class="h-5 w-5 shrink-0 rounded-full object-cover" />
+									{:else}
+										<div class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--app-accent)] text-[8px] font-medium text-[var(--app-accent-foreground)]">
+											{commentAuthor.charAt(0).toUpperCase()}
+										</div>
+									{/if}
+									<span class="text-[13px] font-medium text-[var(--color-text-primary)]">{commentAuthor}</span>
+									{#if comment.gitea_comment_id != null}
+										<span class="rounded-full border border-[var(--app-border)] px-1.5 py-0.5 text-[10px] font-medium leading-none text-[var(--color-text-tertiary)]">{m['issue.comment_badge_gitea']()}</span>
+									{/if}
 									<span class="text-[11px] text-[var(--color-text-tertiary)]">{formatRelativeTime(comment.created_at, getLocale())}</span>
 									{#if comment.resolved_at}
 										<span class="text-[11px] font-medium text-green-400">{m['issue.resolved']()}</span>
@@ -1157,12 +1190,21 @@
 							<!-- Replies -->
 							{#if comment.replies && comment.replies.length > 0}
 								{#each comment.replies as reply (reply.id)}
+									{@const replyAuthor = reply.user?.name ?? reply.author_login ?? 'User'}
+									{@const replyAvatar = reply.user?.avatar_url ?? reply.author_avatar_url}
 									<div class="group/reply border-t border-[var(--app-border)] px-4 py-3 pl-4">
 										<div class="flex items-center gap-2">
-											<div class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--app-accent)] text-[8px] font-medium text-[var(--app-accent-foreground)]">
-												{(reply.user?.name ?? 'U').charAt(0).toUpperCase()}
-											</div>
-											<span class="text-[13px] font-medium text-[var(--color-text-primary)]">{reply.user?.name ?? 'User'}</span>
+											{#if replyAvatar}
+												<img src={replyAvatar} alt="" class="h-5 w-5 shrink-0 rounded-full object-cover" />
+											{:else}
+												<div class="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--app-accent)] text-[8px] font-medium text-[var(--app-accent-foreground)]">
+													{replyAuthor.charAt(0).toUpperCase()}
+												</div>
+											{/if}
+											<span class="text-[13px] font-medium text-[var(--color-text-primary)]">{replyAuthor}</span>
+											{#if reply.gitea_comment_id != null}
+												<span class="rounded-full border border-[var(--app-border)] px-1.5 py-0.5 text-[10px] font-medium leading-none text-[var(--color-text-tertiary)]">{m['issue.comment_badge_gitea']()}</span>
+											{/if}
 											<span class="text-[11px] text-[var(--color-text-tertiary)]">{formatRelativeTime(reply.created_at, getLocale())}</span>
 										</div>
 										<div class="prose prose-invert prose-sm max-w-none mt-2.5 text-[13px] text-[var(--color-text-primary)] [&>p:first-child]:mt-0 [&>p:last-child]:mb-0" use:mentionInteractivity={{ slug, members, issues: issuesState.issues }}>
@@ -1174,7 +1216,18 @@
 
 							<!-- Reply input (hidden when resolved) -->
 							{#if !comment.resolved_at}
-								<div class="border-t border-[var(--app-border)] px-4 py-3 flex items-start gap-3">
+								<div class="border-t border-[var(--app-border)] px-4 py-3 flex flex-wrap items-start gap-3">
+									{#if replyGiteaRequired[comment.id]}
+										<div class="flex w-full flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+											<span class="text-xs text-amber-200">{m['issue.gitea_login_required']()}</span>
+											<a
+												href={`/${slug}/settings/profile`}
+												class="rounded-md border border-amber-500/50 px-2 py-1 text-xs font-medium text-amber-100 transition-colors hover:bg-amber-500/20"
+											>
+												{m['issue.gitea_login_required_action']()}
+											</a>
+										</div>
+									{/if}
 									<div class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--app-accent)] text-[8px] font-medium text-[var(--app-accent-foreground)]">
 										{(authState.user?.name ?? 'U').charAt(0).toUpperCase()}
 									</div>
@@ -1191,7 +1244,7 @@
 													uploadUrl={imageUploadUrl}
 													{members}
 													issues={issuesState.issues}
-													onupdate={(html) => { replyContents[comment.id] = html; replyContents = replyContents; }}
+													onupdate={(html) => { replyContents[comment.id] = html; replyContents = replyContents; if (replyGiteaRequired[comment.id]) { replyGiteaRequired[comment.id] = false; replyGiteaRequired = { ...replyGiteaRequired }; } }}
 													onsubmit={() => handleReply(comment.id)}
 													remoteCursors={getRemoteCursors(`reply-${comment.id}`)}
 													onfocus={() => presenceState.sendFocus(issue.id, `reply-${comment.id}`, 0)}
@@ -1226,6 +1279,17 @@
 							{/each}
 						</div>
 					{/if}
+					{#if giteaLoginRequired}
+						<div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+							<span class="text-xs text-amber-200">{m['issue.gitea_login_required']()}</span>
+							<a
+								href={`/${slug}/settings/profile`}
+								class="rounded-md border border-amber-500/50 px-2 py-1 text-xs font-medium text-amber-100 transition-colors hover:bg-amber-500/20"
+							>
+								{m['issue.gitea_login_required_action']()}
+							</a>
+						</div>
+					{/if}
 					<div class="flex items-end gap-1.5 rounded-lg border border-[var(--app-border)] bg-[var(--color-bg-secondary)] focus-within:border-[var(--color-text-tertiary)] transition-colors p-3">
 						<div class="min-w-0 flex-1 my-auto">
 							{#key commentVersion}
@@ -1239,7 +1303,7 @@
 								uploadUrl={imageUploadUrl}
 								{members}
 								issues={issuesState.issues}
-								onupdate={(html) => newComment = html}
+								onupdate={(html) => { newComment = html; if (giteaLoginRequired) giteaLoginRequired = false; }}
 								onsubmit={handleAddComment}
 								remoteCursors={getRemoteCursors('new-comment')}
 								onfocus={() => presenceState.sendFocus(issue.id, 'new-comment', 0)}
@@ -1281,7 +1345,7 @@
 							<span class="w-20 shrink-0 text-xs text-[var(--color-text-tertiary)]">{m['issue.status']()}</span>
 							<StatusSelector
 								bind:open={statusOpen}
-								statuses={teamStatusesState.statusOrder}
+								statuses={statusesState.statusOrder}
 								value={issue.status_id}
 								onchange={(id) => updateField('status_id', id)}
 								shortcutKey="S"
@@ -1311,40 +1375,6 @@
 									</button>
 								{/snippet}
 							</PrioritySelector>
-						</div>
-
-						<!-- Team row -->
-						<div class="flex items-center gap-3 rounded-md px-2 py-1.5 hover:bg-[var(--color-bg-hover)] transition-colors">
-							<span class="w-20 shrink-0 text-xs text-[var(--color-text-tertiary)]">{m['issue.team']()}</span>
-							<TeamSelector
-								bind:open={teamOpen}
-								{teams}
-								value={issue.team_id ?? undefined}
-								onchange={async (newTeamId) => {
-									try {
-										lastLocalUpdate = Date.now();
-										const updated = await issuesState.update(slug, issue.identifier, { team_id: newTeamId || null });
-										onupdated?.(updated);
-										await refreshIssue();
-									} catch {
-										appToast.error(m['issue.toast.failed_update_field']({ field: 'team' }));
-									}
-								}}
-								showNone={true}
-							>
-								{#snippet trigger()}
-									<button class="flex items-center gap-1.5 text-sm text-[var(--color-text-primary)]">
-										{#if issueTeam}
-											<span class="flex h-4 w-4 items-center justify-center rounded bg-[var(--color-bg-tertiary)] text-[10px] font-medium">
-												{issueTeam.key.charAt(0)}
-											</span>
-											{issueTeam.name}
-										{:else}
-											<span class="text-[var(--color-text-tertiary)]">Sin equipo</span>
-										{/if}
-									</button>
-								{/snippet}
-							</TeamSelector>
 						</div>
 
 						<!-- Assignee row -->
@@ -1498,7 +1528,7 @@
 							bind:open={projectOpen}
 							{projects}
 							value={issue.project_id}
-							onchange={(id) => { updateField('project_id', id ?? ''); if (!id && issue.cycle_id) updateField('cycle_id', ''); }}
+							onchange={(id) => updateField('project_id', id ?? '')}
 						>
 							{#snippet trigger()}
 								{#if issueProject}
@@ -1517,30 +1547,6 @@
 						{#if issueProject?.description}
 							<p class="mt-1 px-2 text-xs text-[var(--color-text-tertiary)] leading-relaxed">{issueProject.description}</p>
 						{/if}
-
-						<!-- Cycle as sub-item of project (only when project is selected) -->
-						{#if issueProject}
-						<div class="ml-3 flex">
-							<svg class="shrink-0 mr-1" width="14" height="100%" viewBox="0 0 14 28" preserveAspectRatio="xMinYMin" fill="none">
-								<path d="M1 0 L1 18 C1 23, 5 23, 9 23 L14 23" stroke="var(--color-text-tertiary)" stroke-width="1.5" opacity="0.4" fill="none"/>
-							</svg>
-							<div class="flex-1 min-w-0 mt-2.5">
-								<CycleSelector
-									bind:open={cycleOpen}
-									{cycles}
-									value={issue.cycle_id}
-									onchange={(id) => updateField('cycle_id', id ?? '')}
-								>
-									{#snippet trigger()}
-										<button class="flex items-center gap-2 rounded-md px-2 py-1 text-xs hover:bg-[var(--color-bg-hover)] transition-colors {issueCycle ? 'text-[var(--color-text-primary)]' : 'text-[var(--color-text-tertiary)]'}">
-											<RefreshCw size={12} class="shrink-0 text-[var(--color-text-tertiary)]" />
-											{issueCycle ? issueCycle.name : m['issue.no_cycle']()}
-										</button>
-									{/snippet}
-								</CycleSelector>
-							</div>
-						</div>
-						{/if}
 					</div>
 				{/if}
 			</div>
@@ -1551,16 +1557,12 @@
 <CreateIssueDialog
 	bind:open={showCreateIssueDialog}
 	{slug}
-	{teams}
 	{projects}
 	{labels}
 	{members}
-	{cycles}
 	parentIssue={createDialogParentIssue}
-	defaultTeamId={createDialogParentIssue ? issue.team_id : issue.team_id}
 	defaultPriority={createDialogParentIssue ? issue.priority : undefined}
-	defaultProjectId={createDialogParentIssue ? issue.project_id : undefined}
-	defaultCycleId={createDialogParentIssue ? issue.cycle_id : undefined}
+	defaultProjectId={createDialogParentIssue ? issue.project_id : issue.project_id}
 	defaultTitle={createIssueTitle}
 	onlabelcreated={(label) => (labels = [label, ...labels.filter((existing) => existing.id !== label.id)])}
 	onbulkcreate={async (titles) => {

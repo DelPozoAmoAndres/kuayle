@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { IssueStatus } from '$lib/types/issue';
-	import type { StatusCategory } from '$lib/types/team-status';
+	import type { StatusCategory } from '$lib/types/status';
 	import { Circle, CircleDashed, Contrast, ClockFading, CheckCircle2, XCircle } from 'lucide-svelte';
 
 	let {

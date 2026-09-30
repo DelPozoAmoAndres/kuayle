@@ -3,12 +3,12 @@ package handler
 import (
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/kuayle/kuayle-backend/internal/domain"
 	"github.com/kuayle/kuayle-backend/internal/dto"
 	"github.com/kuayle/kuayle-backend/internal/service"
 	"github.com/kuayle/kuayle-backend/pkg/response"
 	"github.com/kuayle/kuayle-backend/pkg/validate"
-	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 )
 
@@ -105,27 +105,6 @@ func (h *ProjectHandler) Delete(c echo.Context) error {
 	return response.Success(c, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
-func (h *ProjectHandler) ListByTeam(c echo.Context) error {
-	teamID, err := uuid.Parse(c.Param("teamId"))
-	if err != nil {
-		return response.Error(c, http.StatusBadRequest, "BAD_REQUEST", "Invalid team ID")
-	}
-	projects, err := h.projectSvc.ListByTeam(c.Request().Context(), teamID)
-	if err != nil {
-		return response.InternalError(c)
-	}
-	resp := make([]dto.ProjectResponse, len(projects))
-	for i, p := range projects {
-		r := toProjectResponse(p)
-		stats, _ := h.projectSvc.GetStats(c.Request().Context(), p.ID)
-		if stats != nil {
-			r.Progress = stats
-		}
-		resp[i] = r
-	}
-	return response.Success(c, http.StatusOK, resp)
-}
-
 func toProjectResponse(p domain.Project) dto.ProjectResponse {
 	resp := dto.ProjectResponse{
 		ID:          p.ID.String(),
@@ -135,10 +114,6 @@ func toProjectResponse(p domain.Project) dto.ProjectResponse {
 		SortOrder:   p.SortOrder,
 		CreatedAt:   p.CreatedAt,
 		UpdatedAt:   p.UpdatedAt,
-	}
-	if p.TeamID != nil {
-		s := p.TeamID.String()
-		resp.TeamID = &s
 	}
 	if p.LeadID != nil {
 		s := p.LeadID.String()

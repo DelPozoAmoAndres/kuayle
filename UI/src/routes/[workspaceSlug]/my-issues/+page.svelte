@@ -4,7 +4,7 @@
 	import { goto } from '$app/navigation';
 	import { authState } from '$lib/features/auth/auth.state.svelte';
 	import { issuesState } from '$lib/features/issues/issues.state.svelte';
-	import { teamStatusesState } from '$lib/features/issues/team-statuses.state.svelte';
+	import { statusesState } from '$lib/features/issues/statuses.state.svelte';
 	import IssueRow from '$lib/features/issues/IssueRow.svelte';
 	import KanbanBoard from '$lib/features/issues/KanbanBoard.svelte';
 	import FilterBuilder from '$lib/components/shared/FilterBuilder.svelte';
@@ -38,8 +38,6 @@
 		'priority',
 		'assignee',
 		'project',
-		'cycle',
-		'team',
 		'label',
 		'creator'
 	] as const;
@@ -112,11 +110,8 @@
 		issuesState.groupBy = 'status';
 		await issuesState.load(slug, params);
 
-		// Load team statuses from the first issue's team for status pickers
-		const firstTeamId = issuesState.issues[0]?.team_id;
-		if (firstTeamId) {
-			teamStatusesState.load(slug, firstTeamId);
-		}
+		// Load workspace statuses for status pickers
+		void statusesState.load(slug);
 	}
 
 	function handleTabChange(tab: string) {

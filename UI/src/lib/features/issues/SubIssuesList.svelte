@@ -3,7 +3,7 @@
 	import type { WorkspaceMember } from '$lib/types/workspace';
 	import { listSubIssues } from '$lib/api/issue-relations';
 	import { issuesState } from './issues.state.svelte';
-	import { teamStatusesState } from './team-statuses.state.svelte';
+	import { statusesState } from './statuses.state.svelte';
 	import { StatusSelector, PrioritySelector, AssigneeSelector } from './selectors';
 	import SubIssuesList from './SubIssuesList.svelte';
 	import IssueStatusIcon from './IssueStatusIcon.svelte';
@@ -130,7 +130,7 @@
 					<div class="flex w-full items-center gap-2 px-3 py-1.5 transition-colors hover:bg-[var(--color-bg-hover)] {!showHeader ? 'rounded-l-md' : ''}">
 					{#if editable}
 						<StatusSelector
-							statuses={teamStatusesState.statusOrder}
+							statuses={statusesState.statusOrder}
 							value={subIssue.status_id}
 							width="w-44"
 							onchange={(statusId) => updateSubIssue(subIssue, { status_id: statusId })}

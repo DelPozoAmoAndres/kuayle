@@ -11,6 +11,7 @@ import (
 	"github.com/kuayle/kuayle-backend/internal/dto"
 	"github.com/kuayle/kuayle-backend/internal/repository"
 	"github.com/kuayle/kuayle-backend/pkg/audit"
+	log "github.com/sirupsen/logrus"
 )
 
 var (
@@ -24,10 +25,11 @@ var (
 type WorkspaceService struct {
 	workspaceRepo repository.WorkspaceRepo
 	userRepo      repository.UserRepo
+	statusRepo    repository.StatusRepo
 }
 
-func NewWorkspaceService(workspaceRepo repository.WorkspaceRepo, userRepo repository.UserRepo) *WorkspaceService {
-	return &WorkspaceService{workspaceRepo: workspaceRepo, userRepo: userRepo}
+func NewWorkspaceService(workspaceRepo repository.WorkspaceRepo, userRepo repository.UserRepo, statusRepo repository.StatusRepo) *WorkspaceService {
+	return &WorkspaceService{workspaceRepo: workspaceRepo, userRepo: userRepo, statusRepo: statusRepo}
 }
 
 type defaultWorkspaceLabel struct {
@@ -75,6 +77,26 @@ func (s *WorkspaceService) Create(ctx context.Context, userID uuid.UUID, req dto
 			return nil, ErrWorkspaceSlugTaken
 		}
 		return nil, err
+	}
+
+	// Seed the default statuses for the new workspace (statuses are now
+	// workspace-scoped; teams no longer own them).
+	if s.statusRepo != nil {
+		for _, spec := range defaultStatusSpecs() {
+			isDefault := spec.Position == 0
+			status := &domain.WorkspaceStatus{
+				ID:          uuid.New(),
+				WorkspaceID: ws.ID,
+				Name:        spec.Name,
+				Slug:        spec.Slug,
+				Category:    spec.Category,
+				Position:    spec.Position,
+				IsDefault:   isDefault,
+			}
+			if err := s.statusRepo.Create(ctx, status); err != nil {
+				log.WithError(err).WithField("workspace_id", ws.ID).Warn("failed to seed default status")
+			}
+		}
 	}
 
 	audit.Log("workspace.created", userID, map[string]interface{}{

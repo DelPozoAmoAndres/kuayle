@@ -21,16 +21,14 @@
 	import { listLabels } from '$lib/api/labels';
 	import { listMembers } from '$lib/api/members';
 	import { listProjects } from '$lib/api/projects';
-	import { listTeams } from '$lib/api/teams';
-	import { listTeamStatuses } from '$lib/api/team-statuses';
+	import { listStatuses } from '$lib/api/statuses';
 	import type { Label } from '$lib/types/label';
 	import type { Project } from '$lib/types/project';
-	import type { Team } from '$lib/types/team';
-	import type { TeamStatus } from '$lib/types/team-status';
+	import type { WorkspaceStatus } from '$lib/types/status';
 	import type { WorkspaceMember } from '$lib/types/workspace';
 	import type { IssuePriority } from '$lib/types/issue';
 	import { getPriorityLabel } from '$lib/types/issue';
-	import { getCategoryLabel, type StatusCategory } from '$lib/types/team-status';
+	import { getCategoryLabel, type StatusCategory } from '$lib/types/status';
 
 	const slug = $derived(page.params.workspaceSlug ?? '');
 
@@ -66,11 +64,10 @@
 	let dragOverCategory = $state<StatusCategory | null>(null);
 	let dropIndicator = $state<'above' | 'below'>('below');
 	let issueDefaults = $state<IssueCreateDefaults>({});
-	let teams = $state<Team[]>([]);
 	let projects = $state<Project[]>([]);
 	let labels = $state<Label[]>([]);
 	let members = $state<WorkspaceMember[]>([]);
-	let statuses = $state<TeamStatus[]>([]);
+	let statuses = $state<WorkspaceStatus[]>([]);
 	let issueDefaultsLoading = $state(true);
 
 	const priorityValues: IssuePriority[] = [0, 1, 2, 3, 4];
@@ -78,19 +75,16 @@
 	onMount(async () => {
 		issueDefaults = getIssueCreateDefaults(slug);
 		try {
-			const [t, p, l, m] = await Promise.all([
-				listTeams(slug),
+			const [p, l, m, s] = await Promise.all([
 				listProjects(slug),
 				listLabels(slug),
-				listMembers(slug)
+				listMembers(slug),
+				listStatuses(slug)
 			]);
-			teams = t;
 			projects = p;
 			labels = l;
 			members = m;
-			if (issueDefaults.teamId) {
-				statuses = await listTeamStatuses(slug, issueDefaults.teamId);
-			}
+			statuses = s;
 		} finally {
 			issueDefaultsLoading = false;
 		}
@@ -99,15 +93,6 @@
 	function saveIssueDefaults(next: IssueCreateDefaults) {
 		issueDefaults = next;
 		setIssueCreateDefaults(slug, next);
-	}
-
-	async function setDefaultTeam(teamId: string | undefined) {
-		statuses = [];
-		const next = { ...issueDefaults, teamId, statusId: undefined };
-		saveIssueDefaults(next);
-		if (teamId) {
-			statuses = await listTeamStatuses(slug, teamId);
-		}
 	}
 
 	function setDefaultPriority(priority: IssuePriority | undefined) {
@@ -141,7 +126,6 @@
 	function clearDefaults() {
 		clearIssueCreateDefaults(slug);
 		issueDefaults = {};
-		statuses = [];
 	}
 
 	function moveWorkflowCategory(category: StatusCategory, direction: -1 | 1) {
@@ -460,19 +444,19 @@
 
 		<div class="grid gap-4 px-5 py-4 sm:grid-cols-2">
 			<div>
-				<p class="mb-1.5 text-xs text-[var(--color-text-tertiary)]">{m['prefs.team']()}</p>
+				<p class="mb-1.5 text-xs text-[var(--color-text-tertiary)]">{m['prefs.project']()}</p>
 				<Select.Root
 					type="single"
-					value={issueDefaults.teamId ?? 'none'}
-					onValueChange={(v) => setDefaultTeam(v === 'none' ? undefined : v)}
+					value={issueDefaults.projectId ?? 'none'}
+					onValueChange={(v) => setDefaultProject(v === 'none' ? undefined : v)}
 				>
 					<Select.Trigger size="sm" class="w-full">
-						{teams.find((team) => team.id === issueDefaults.teamId)?.name ?? m['prefs.no_default']()}
+						{projects.find((project) => project.id === issueDefaults.projectId)?.name ?? m['prefs.no_default']()}
 					</Select.Trigger>
 					<Select.Content>
 						<Select.Item value="none">{m['prefs.no_default']()}</Select.Item>
-						{#each teams as team (team.id)}
-							<Select.Item value={team.id}>{team.name}</Select.Item>
+						{#each projects as project (project.id)}
+							<Select.Item value={project.id}>{project.name}</Select.Item>
 						{/each}
 					</Select.Content>
 				</Select.Root>
@@ -484,7 +468,6 @@
 					type="single"
 					value={issueDefaults.statusId ?? 'none'}
 					onValueChange={(v) => setDefaultStatus(v === 'none' ? undefined : v)}
-					disabled={!issueDefaults.teamId}
 				>
 					<Select.Trigger size="sm" class="w-full">
 						{statuses.find((status) => status.id === issueDefaults.statusId)?.name ?? m['prefs.no_default']()}
@@ -512,25 +495,6 @@
 						<Select.Item value="none">{m['prefs.no_default']()}</Select.Item>
 						{#each priorityValues as value (value)}
 							<Select.Item value={String(value)}>{getPriorityLabel(value)}</Select.Item>
-						{/each}
-					</Select.Content>
-				</Select.Root>
-			</div>
-
-			<div>
-				<p class="mb-1.5 text-xs text-[var(--color-text-tertiary)]">{m['prefs.project']()}</p>
-				<Select.Root
-					type="single"
-					value={issueDefaults.projectId ?? 'none'}
-					onValueChange={(v) => setDefaultProject(v === 'none' ? undefined : v)}
-				>
-					<Select.Trigger size="sm" class="w-full">
-						{projects.find((project) => project.id === issueDefaults.projectId)?.name ?? m['prefs.no_default']()}
-					</Select.Trigger>
-					<Select.Content>
-						<Select.Item value="none">{m['prefs.no_default']()}</Select.Item>
-						{#each projects as project (project.id)}
-							<Select.Item value={project.id}>{project.name}</Select.Item>
 						{/each}
 					</Select.Content>
 				</Select.Root>

@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import type { Team } from '$lib/types/team';
 	import type { Issue } from '$lib/types/issue';
 	import { listIssues } from '$lib/api/issues';
 	import { Kbd } from '$lib/components/ui/kbd';
@@ -13,12 +12,10 @@
 
 	let {
 		slug,
-		teams,
 		onclose,
 		oncreateissue
 	}: {
 		slug: string;
-		teams: Team[];
 		onclose: () => void;
 		oncreateissue?: () => void;
 	} = $props();
@@ -65,12 +62,7 @@
 			{ label: m['sidebar.go_inbox'](), keys: ['G', 'I'], action: () => navigate(`/${slug}/inbox`) },
 			{ label: m['sidebar.go_my_issues'](), keys: ['G', 'M'], action: () => navigate(`/${slug}/my-issues`) },
 			{ label: m['sidebar.go_projects'](), keys: ['G', 'P'], action: () => navigate(`/${slug}/projects`) },
-			{ label: m['sidebar.go_settings'](), keys: ['G', 'S'], action: () => navigate(`/${slug}/settings`) },
-			...teams.map((t) => ({
-				label: m['sidebar.go_to_team']({ name: t.name }),
-				description: t.key,
-				action: () => navigate(`/${slug}/teams/${t.id}`)
-			}))
+			{ label: m['sidebar.go_settings'](), keys: ['G', 'S'], action: () => navigate(`/${slug}/settings`) }
 		];
 
 		if (!search) return items;
@@ -359,7 +351,7 @@
 					<div class="text-xs font-medium text-[var(--color-text-primary)]">{m['sidebar.search_matches']()}</div>
 					<p class="mt-1 text-xs leading-5 text-[var(--color-text-tertiary)]">
 						{m['sidebar.cmd_search_matches_desc']()}
-						labels, cycle, due date, team, and priority. Description matches include a short highlighted snippet.
+						labels, due date, and priority. Description matches include a short highlighted snippet.
 					</p>
 				</div>
 			</aside>

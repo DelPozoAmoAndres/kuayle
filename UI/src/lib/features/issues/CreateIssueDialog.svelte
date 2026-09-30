@@ -4,24 +4,22 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as Popover from '$lib/components/ui/popover';
 	import { Switch } from '$lib/components/ui/switch';
-	import type { Team } from '$lib/types/team';
 	import type { Project } from '$lib/types/project';
 	import type { Label } from '$lib/types/label';
 	import type { WorkspaceMember } from '$lib/types/workspace';
-	import type { Cycle } from '$lib/types/cycle';
 	import type { Issue, IssueStatus, IssuePriority } from '$lib/types/issue';
 	import { getPriorityLabel } from '$lib/types/issue';
 	import type { IssueTemplate } from '$lib/types/issue';
-	import { teamStatusesState } from './team-statuses.state.svelte';
+	import { statusesState } from './statuses.state.svelte';
 	import { getIssueCreateDefaults } from './create-defaults';
-	import type { StatusCategory } from '$lib/types/team-status';
+	import type { StatusCategory } from '$lib/types/status';
 	import RichEditor from '$lib/components/shared/RichEditor.svelte';
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import IssueStatusIcon from './IssueStatusIcon.svelte';
 	import IssuePriorityIcon from './IssuePriorityIcon.svelte';
 	import { issuesState } from './issues.state.svelte';
 	import DatePickerPopover from '$lib/components/shared/DatePickerPopover.svelte';
-	import { StatusSelector, PrioritySelector, AssigneeSelector, LabelSelector, ProjectSelector, CycleSelector, TeamSelector } from './selectors';
+	import { StatusSelector, PrioritySelector, AssigneeSelector, LabelSelector, ProjectSelector } from './selectors';
 	import { listTemplates } from '$lib/api/issue-templates';
 	import { m } from '$lib/paraglide/messages.js';
 	import { getLocale, setLocale } from '$lib/paraglide/runtime.js';
@@ -29,18 +27,16 @@
 		User,
 		Tag,
 		FolderKanban,
-		FileText
+		FileText,
+		AlertTriangle
 	} from 'lucide-svelte';
 
 	let {
 		open = $bindable(false),
 		slug = '',
-		teams,
 		projects = [],
 		labels = [],
 		members = [],
-		cycles = [],
-		defaultTeamId,
 		defaultStatus,
 		defaultStatusId,
 		defaultPriority,
@@ -49,7 +45,6 @@
 		defaultAssigneeIds,
 		defaultLabelIds,
 		defaultDueDate,
-		defaultCycleId,
 		defaultTitle,
 		parentIssue = null,
 		onlabelcreated,
@@ -58,12 +53,9 @@
 	}: {
 		open: boolean;
 		slug?: string;
-		teams: Team[];
 		projects?: Project[];
 		labels?: Label[];
 		members?: WorkspaceMember[];
-		cycles?: Cycle[];
-		defaultTeamId?: string;
 		defaultStatus?: IssueStatus;
 		defaultStatusId?: string;
 		defaultPriority?: IssuePriority;
@@ -72,7 +64,6 @@
 		defaultAssigneeIds?: string[];
 		defaultLabelIds?: string[];
 		defaultDueDate?: string | null;
-		defaultCycleId?: string | null;
 		defaultTitle?: string;
 		parentIssue?: Issue | null;
 		onlabelcreated?: (label: Label) => void;
@@ -83,14 +74,12 @@
 			status?: IssueStatus;
 			status_id?: string;
 			priority: IssuePriority;
-			team_id?: string | null;
-			project_id?: string;
+			project_id: string;
 			assignee_id?: string;
 			assignee_ids?: string[];
 			label_ids?: string[];
 			parent_id?: string;
 			due_date?: string;
-			cycle_id?: string;
 		}) => void;
 	} = $props();
 
@@ -98,12 +87,10 @@
 	let description = $state('');
 	let statusId = $state<string>('');
 	let priority = $state<IssuePriority>(0);
-	let teamId = $state('');
 	let projectId = $state<string | null>(null);
 	let assigneeIds = $state<string[]>([]);
 	let labelIds = $state<string[]>([]);
 	let dueDate = $state<string | null>(null);
-	let cycleId = $state<string | null>(null);
 	let createMore = $state(false);
 
 	let templates = $state<IssueTemplate[]>([]);
@@ -113,30 +100,13 @@
 
 	let statusOpen = $state(false);
 	let priorityOpen = $state(false);
-	let teamOpen = $state(false);
 	let projectOpen = $state(false);
 	let assigneeOpen = $state(false);
 	let labelsOpen = $state(false);
-	let cycleOpen = $state(false);
-
-	function validTeam(id: string | undefined): string | undefined {
-		if (!id) return undefined;
-		return teams.some((t) => t.id === id) ? id : undefined;
-	}
-
-	function validStatus(id: string | undefined): string | undefined {
-		if (!id) return undefined;
-		return teamStatusesState.statusById.has(id) ? id : undefined;
-	}
 
 	function validProject(id: string | null | undefined): string | null {
 		if (!id) return null;
 		return projects.some((p) => p.id === id) ? id : null;
-	}
-
-	function validCycle(id: string | null | undefined): string | null {
-		if (!id) return null;
-		return cycles?.some((c) => c.id === id) ? id : null;
 	}
 
 	function validMemberIds(ids: string[] | undefined): string[] {
@@ -152,17 +122,22 @@
 	}
 
 	function applyDefaultStatus(preferredStatusId?: string) {
-		statusId = validStatus(preferredStatusId) ?? teamStatusesState.defaultForCategory('backlog')?.id ?? '';
+		const available = statusesState.statusesForProject(projectId);
+		statusId =
+			available.find((s) => s.id === preferredStatusId)?.id ??
+			available.find((s) => s.category === 'backlog' && s.is_default)?.id ??
+			available[0]?.id ??
+			'';
 	}
 
-	function loadStatusesForTeam(nextTeamId: string, preferredStatusId?: string) {
-		if (!slug || !nextTeamId) {
+	function loadStatuses(preferredStatusId?: string) {
+		if (!slug) {
 			applyDefaultStatus(preferredStatusId);
 			return;
 		}
 
-		teamStatusesState.load(slug, nextTeamId).then(() => {
-			if (open && teamId === nextTeamId) {
+		statusesState.load(slug).then(() => {
+			if (open) {
 				applyDefaultStatus(preferredStatusId);
 			}
 		});
@@ -175,14 +150,16 @@
 		descriptionVersion++;
 		selectedTemplate = null;
 		priority = defaultPriority ?? savedDefaults.priority ?? 0;
-		teamId = validTeam(defaultTeamId) ?? validTeam(savedDefaults.teamId) ?? teams[0]?.id ?? '';
+		// Project is mandatory: fall back to the first project of the workspace.
+		projectId =
+			(defaultProjectId !== undefined ? validProject(defaultProjectId) : validProject(savedDefaults.projectId)) ??
+			projects[0]?.id ??
+			null;
 		statusId = '';
-		loadStatusesForTeam(teamId, defaultStatusId ?? savedDefaults.statusId);
-		projectId = defaultProjectId !== undefined ? validProject(defaultProjectId) : validProject(savedDefaults.projectId);
+		loadStatuses(defaultStatusId ?? savedDefaults.statusId);
 		assigneeIds = defaultAssigneeIds ? validMemberIds(defaultAssigneeIds) : (defaultAssigneeId ? validMemberIds([defaultAssigneeId]) : validMemberIds(savedDefaults.assigneeIds));
 		labelIds = defaultLabelIds ? validLabelIds(defaultLabelIds) : validLabelIds(savedDefaults.labelIds);
 		dueDate = defaultDueDate !== undefined ? defaultDueDate : savedDefaults.dueDate ?? null;
-		cycleId = defaultCycleId !== undefined ? validCycle(defaultCycleId) : validCycle(savedDefaults.cycleId);
 		if (slug) listTemplates(slug).then(t => templates = t).catch(() => {});
 	}
 
@@ -192,29 +169,27 @@
 		}
 	});
 
-	let selectedTeam = $derived(teams.find((t) => t.id === teamId));
 	let selectedProject = $derived(projects.find((p) => p.id === projectId));
 	let selectedAssignees = $derived(members.filter((m) => assigneeIds.includes(m.user_id)));
 	let selectedLabels = $derived(labels.filter((l) => labelIds.includes(l.id)));
+	let hasProject = $derived(projects.length > 0 && !!projectId);
 
 	const priorityValues: IssuePriority[] = [0, 1, 2, 3, 4];
 
-	const selectedStatus = $derived(teamStatusesState.statusById.get(statusId));
+	const selectedStatus = $derived(statusesState.statusById.get(statusId));
 
 	function handleSubmit() {
-		if (!title.trim()) return;
+		if (!title.trim() || !projectId) return;
 		onsubmit({
 			title: title.trim(),
 			description: description.trim() || undefined,
 			status_id: statusId || undefined,
 			priority,
-			team_id: teamId || undefined,
-			project_id: projectId || undefined,
+			project_id: projectId,
 			assignee_ids: assigneeIds.length > 0 ? assigneeIds : undefined,
 			label_ids: labelIds.length > 0 ? labelIds : undefined,
 			parent_id: parentIssue?.id,
-			due_date: dueDate || undefined,
-			cycle_id: cycleId || undefined
+			due_date: dueDate || undefined
 		});
 		if (createMore) {
 			title = selectedTemplate?.title || '';
@@ -261,7 +236,7 @@
 		if (tmpl.status) {
 			const category = STATUS_TO_CATEGORY[tmpl.status];
 			if (category) {
-				const defaultStatus = teamStatusesState.defaultForCategory(category);
+				const defaultStatus = statusesState.defaultForCategory(category);
 				if (defaultStatus) statusId = defaultStatus.id;
 			}
 		}
@@ -287,10 +262,9 @@
 		}
 	}
 
-	function handleTeamChange(id: string) {
-		teamId = id;
-		statusId = '';
-		loadStatusesForTeam(id);
+	function handleProjectChange(id: string | null) {
+		projectId = id;
+		applyDefaultStatus(statusId);
 	}
 </script>
 
@@ -303,25 +277,8 @@
 			input?.focus();
 		}}
 	>
-		<!-- Top bar: Team + Template -->
+		<!-- Top bar: Template -->
 		<div class="flex items-center gap-1.5 px-3 pr-10 py-2 max-sm:shrink-0">
-			<TeamSelector
-				bind:open={teamOpen}
-				{teams}
-				value={teamId}
-				onchange={handleTeamChange}
-				showNone={true}
-			>
-				{#snippet trigger()}
-					<button tabindex="-1" class="flex items-center gap-1.5 rounded-md border border-[var(--app-border)] bg-[var(--color-bg-tertiary)] px-2.5 py-1 text-xs font-medium text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]">
-						<span class="flex h-4 w-4 items-center justify-center rounded bg-[var(--app-accent)] text-[9px] font-bold text-[var(--app-accent-foreground)]">
-							{selectedTeam?.key?.charAt(0) ?? '–'}
-						</span>
-						{selectedTeam?.key ?? 'Sin equipo'}
-					</button>
-				{/snippet}
-			</TeamSelector>
-			<span class="text-xs text-[var(--color-text-tertiary)]">›</span>
 			{#if templates.length > 0}
 				<Popover.Root bind:open={templateOpen}>
 					<Popover.Trigger>
@@ -390,7 +347,7 @@
 			<!-- Status -->
 			<StatusSelector
 				bind:open={statusOpen}
-				statuses={teamStatusesState.statusOrder}
+				statuses={statusesState.statusesForProject(projectId)}
 				value={statusId}
 				onchange={(id) => { statusId = id; }}
 				width="w-44"
@@ -417,15 +374,16 @@
 				{/snippet}
 			</PrioritySelector>
 
-			<!-- Project -->
+			<!-- Project (mandatory) -->
 			<ProjectSelector
 				bind:open={projectOpen}
 				{projects}
 				value={projectId}
-				onchange={(id) => { projectId = id; }}
+				onchange={handleProjectChange}
+				showNone={false}
 			>
 				{#snippet trigger()}
-					<button class="flex items-center gap-1.5 rounded-full border border-[var(--app-border)] px-2.5 py-1 max-sm:px-3 max-sm:py-1.5 text-xs {selectedProject ? 'text-[var(--color-text-secondary)]' : 'text-[var(--color-text-tertiary)]'} hover:bg-[var(--color-bg-hover)]">
+					<button class="flex items-center gap-1.5 rounded-full border {projectId ? 'border-[var(--app-border)]' : 'border-[var(--color-error)]'} px-2.5 py-1 max-sm:px-3 max-sm:py-1.5 text-xs {selectedProject ? 'text-[var(--color-text-secondary)]' : 'text-[var(--color-text-tertiary)]'} hover:bg-[var(--color-bg-hover)]">
 						<FolderKanban size={12} />
 						{selectedProject?.name ?? m['sharedComponents.create_issue.project']()}
 					</button>
@@ -482,24 +440,6 @@
 				{/snippet}
 			</LabelSelector>
 
-			<!-- Cycle -->
-			<CycleSelector
-				bind:open={cycleOpen}
-				cycles={cycles ?? []}
-				value={cycleId}
-				onchange={(id) => { cycleId = id; }}
-			>
-				{#snippet trigger()}
-					<button class="flex items-center gap-1.5 rounded-full border border-[var(--app-border)] px-2.5 py-1 max-sm:px-3 max-sm:py-1.5 text-xs {cycleId ? 'text-[var(--color-text-secondary)]' : 'text-[var(--color-text-tertiary)]'} hover:bg-[var(--color-bg-hover)]">
-						{#if cycleId}
-							{cycles?.find(c => c.id === cycleId)?.name ?? m['sharedComponents.create_issue.cycle']()}
-						{:else}
-							{m['sharedComponents.create_issue.cycle']()}
-						{/if}
-					</button>
-				{/snippet}
-			</CycleSelector>
-
 			<!-- Due Date -->
 			<DatePickerPopover
 				value={dueDate}
@@ -508,6 +448,14 @@
 				dueDateMode
 			/>
 		</div>
+
+		<!-- No projects warning -->
+		{#if projects.length === 0}
+			<div class="mx-4 mb-2 flex items-start gap-2 rounded-md border border-[var(--app-border)] bg-[var(--color-bg-tertiary)] px-3 py-2 text-xs text-[var(--color-text-secondary)]">
+				<AlertTriangle size={14} class="mt-0.5 shrink-0 text-[var(--color-text-tertiary)]" />
+				<span>{m['issue.create_project_first']()}</span>
+			</div>
+		{/if}
 
 		<!-- Footer -->
 		<div class="flex items-center justify-end gap-3 px-4 py-2.5 max-sm:sticky max-sm:bottom-0 max-sm:shrink-0 max-sm:flex-col max-sm:items-stretch max-sm:border-t max-sm:border-[var(--app-border)] max-sm:bg-[var(--color-bg-secondary)] max-sm:pb-[calc(1rem+env(safe-area-inset-bottom,0px))]">
@@ -518,7 +466,7 @@
 			<Button
 				class="max-sm:w-full"
 				size="sm"
-				disabled={!title.trim()}
+				disabled={!title.trim() || !hasProject}
 				onclick={handleSubmit}
 			>
 				{m['sharedComponents.create_issue.create_issue']()}

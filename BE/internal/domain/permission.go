@@ -3,7 +3,6 @@ package domain
 const (
 	PermWorkspaceManage   = "workspace:manage"
 	PermWorkspaceTransfer = "workspace:transfer"
-	PermTeamManage        = "team:manage"
 	PermIssueCreate       = "issue:create"
 	PermIssueRead         = "issue:read"
 	PermIssueUpdate       = "issue:update"
@@ -12,7 +11,6 @@ const (
 	PermProjectManage     = "project:manage"
 	PermLabelManage       = "label:manage"
 	PermMemberInvite      = "member:invite"
-	PermCycleManage       = "cycle:manage"
 	PermViewManage        = "view:manage"
 	PermDevMachineRead    = "dev_machine:read"
 	PermDevMachineCreate  = "dev_machine:create"
@@ -22,20 +20,20 @@ const (
 
 var RolePermissions = map[string][]string{
 	RoleOwner: {
-		PermWorkspaceManage, PermWorkspaceTransfer, PermTeamManage, PermIssueCreate, PermIssueRead,
+		PermWorkspaceManage, PermWorkspaceTransfer, PermIssueCreate, PermIssueRead,
 		PermIssueUpdate, PermIssueDelete, PermIssueDeleteOwn, PermProjectManage, PermLabelManage,
-		PermMemberInvite, PermCycleManage, PermViewManage,
+		PermMemberInvite, PermViewManage,
 		PermDevMachineRead, PermDevMachineCreate, PermDevMachineManage, PermDevMachineAdmin,
 	},
 	RoleAdmin: {
-		PermWorkspaceTransfer, PermTeamManage, PermIssueCreate, PermIssueRead, PermIssueUpdate,
+		PermWorkspaceManage, PermWorkspaceTransfer, PermIssueCreate, PermIssueRead, PermIssueUpdate,
 		PermIssueDelete, PermIssueDeleteOwn, PermProjectManage, PermLabelManage, PermMemberInvite,
-		PermCycleManage, PermViewManage,
+		PermViewManage,
 		PermDevMachineRead, PermDevMachineCreate, PermDevMachineManage, PermDevMachineAdmin,
 	},
 	RoleMember: {
 		PermIssueCreate, PermIssueRead, PermIssueUpdate, PermIssueDeleteOwn, PermProjectManage,
-		PermLabelManage, PermCycleManage, PermViewManage,
+		PermLabelManage, PermViewManage,
 		PermDevMachineRead, PermDevMachineCreate, PermDevMachineManage,
 	},
 	RoleGuest: {

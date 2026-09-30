@@ -1,9 +1,9 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, onDestroy } from 'svelte';
 	import BellIcon from '@lucide/svelte/icons/bell';
 	import type { Issue, Comment, IssueHistory, IssuePriority } from '$lib/types/issue';
 	import { getPriorityLabel } from '$lib/types/issue';
-	import { teamStatusesState } from './team-statuses.state.svelte';
+	import { statusesState } from './statuses.state.svelte';
 	import { listComments, createComment, getIssueHistory, subscribeToIssue, unsubscribeFromIssue } from '$lib/api/issues';
 	import { issuesState } from './issues.state.svelte';
 	import IssueStatusIcon from './IssueStatusIcon.svelte';
@@ -29,6 +29,7 @@
 	let comments = $state<Comment[]>([]);
 	let history = $state<IssueHistory[]>([]);
 	let newComment = $state('');
+	let giteaLoginRequired = $state(false);
 	let tab = $state<'comments' | 'activity'>('comments');
 	let statusOpen = $state(false);
 	let priorityOpen = $state(false);
@@ -62,6 +63,56 @@
 		members = m;
 	});
 
+	// --- Real-time comment events ---
+	function matchesCurrentIssue(detail: any): boolean {
+		if (!detail) return false;
+		return detail.identifier === issue.identifier
+			|| detail.id === issue.id
+			|| detail.issue_id === issue.id;
+	}
+
+	async function refreshComments() {
+		try {
+			const c = await listComments(slug, issue.identifier);
+			comments = c ?? [];
+		} catch { /* ignore */ }
+	}
+
+	function removeCommentById(list: Comment[], commentId: string): Comment[] {
+		return list
+			.filter((c) => c.id !== commentId)
+			.map((c) => (c.replies && c.replies.length > 0 ? { ...c, replies: removeCommentById(c.replies, commentId) } : c));
+	}
+
+	function onCommentUpdated(e: Event) {
+		const detail = (e as CustomEvent).detail;
+		if (matchesCurrentIssue(detail)) refreshComments();
+	}
+
+	function onCommentDeleted(e: Event) {
+		const detail = (e as CustomEvent).detail;
+		if (!matchesCurrentIssue(detail)) return;
+		if (detail?.comment_id) {
+			comments = removeCommentById(comments, detail.comment_id);
+		} else {
+			refreshComments();
+		}
+	}
+
+	onMount(() => {
+		window.addEventListener('ws:comment-updated', onCommentUpdated);
+		window.addEventListener('ws:comment-deleted', onCommentDeleted);
+	});
+
+	onDestroy(() => {
+		window.removeEventListener('ws:comment-updated', onCommentUpdated);
+		window.removeEventListener('ws:comment-deleted', onCommentDeleted);
+	});
+
+	function isGiteaLoginRequired(err: unknown): boolean {
+		return (err as { error?: { code?: string } } | null)?.error?.code === 'GITEA_LOGIN_REQUIRED';
+	}
+
 	async function handleAddComment(e: Event) {
 		e.preventDefault();
 		if (!newComment.trim()) return;
@@ -69,9 +120,14 @@
 			const comment = await createComment(slug, issue.identifier, newComment);
 			comments = [...comments, comment];
 			newComment = '';
+			giteaLoginRequired = false;
 			appToast.success('Comment added');
 		} catch (err: any) {
-			appToast.apiError(err, 'Failed to add comment');
+			if (isGiteaLoginRequired(err)) {
+				giteaLoginRequired = true;
+			} else {
+				appToast.apiError(err, 'Failed to add comment');
+			}
 		}
 	}
 
@@ -127,7 +183,6 @@
 			case 'due_date': return 'due date';
 			case 'parent_id': return 'parent';
 			case 'project_id': return 'project';
-			case 'cycle_id': return 'cycle';
 			case 'status_id': return 'status';
 			default: return field;
 		}
@@ -171,7 +226,7 @@
 					<span class="w-20 text-[var(--color-text-tertiary)]">Status</span>
 					<StatusSelector
 						bind:open={statusOpen}
-						statuses={teamStatusesState.statusOrder}
+						statuses={statusesState.statusOrder}
 						value={issue.status_id}
 						onchange={(id) => { updateStatus(id); }}
 					>
@@ -223,11 +278,23 @@
 			{#if tab === 'comments'}
 				<div class="mt-4 space-y-4">
 					{#each comments as comment}
+						{@const commentAuthor = comment.user?.name ?? comment.author_login ?? 'User'}
+						{@const commentAvatar = comment.user?.avatar_url ?? comment.author_avatar_url}
 						<div class="text-sm">
 							<div class="flex items-center gap-2">
+								{#if commentAvatar}
+									<img src={commentAvatar} alt="" class="h-6 w-6 shrink-0 rounded-full object-cover" />
+								{:else}
+									<div class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--app-accent)] text-[10px] font-medium text-[var(--app-accent-foreground)]">
+										{commentAuthor.charAt(0).toUpperCase()}
+									</div>
+								{/if}
 								<span class="font-medium text-[var(--color-text-primary)]"
-									>{comment.user?.name ?? 'User'}</span
+									>{commentAuthor}</span
 								>
+								{#if comment.gitea_comment_id != null}
+									<span class="rounded-full border border-[var(--app-border)] px-1.5 py-0.5 text-[10px] font-medium leading-none text-[var(--color-text-tertiary)]">{m['issue.comment_badge_gitea']()}</span>
+								{/if}
 								<span class="text-[var(--color-text-tertiary)]"
 									>{formatRelativeTime(comment.created_at, getLocale())}</span
 								>
@@ -238,10 +305,22 @@
 						</div>
 					{/each}
 
-					<form onsubmit={handleAddComment} class="sticky bottom-0 -mx-4 flex gap-2 border-t border-[var(--app-border)] bg-[var(--color-bg)] px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:p-0">
+					<form onsubmit={handleAddComment} class="sticky bottom-0 -mx-4 flex flex-wrap gap-2 border-t border-[var(--app-border)] bg-[var(--color-bg)] px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:p-0">
+						{#if giteaLoginRequired}
+							<div class="flex w-full flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
+								<span class="text-xs text-amber-200">{m['issue.gitea_login_required']()}</span>
+								<a
+									href={`/${slug}/settings/profile`}
+									class="rounded-md border border-amber-500/50 px-2 py-1 text-xs font-medium text-amber-100 transition-colors hover:bg-amber-500/20"
+								>
+									{m['issue.gitea_login_required_action']()}
+								</a>
+							</div>
+						{/if}
 						<input
 							type="text"
 							bind:value={newComment}
+							oninput={() => { if (giteaLoginRequired) giteaLoginRequired = false; }}
 							placeholder="Write a comment..."
 							class="flex-1 rounded border border-[var(--app-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--app-accent)]"
 						/>

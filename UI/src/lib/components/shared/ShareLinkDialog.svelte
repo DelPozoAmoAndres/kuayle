@@ -20,7 +20,7 @@
 	}: {
 		open: boolean;
 		slug: string;
-		scope: 'workspace' | 'team' | 'project' | 'view';
+		scope: 'workspace' | 'project' | 'view';
 		scopeId?: string;
 		filters?: ViewFilter;
 	} = $props();

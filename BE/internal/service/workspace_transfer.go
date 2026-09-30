@@ -287,6 +287,10 @@ func sanitizeExportRow(table string, row dto.WorkspaceTransferRow) {
 		delete(row, "token_expires_at")
 	case "github_repos", "github_auto_transitions":
 		row["is_active"] = false
+	case "comments":
+		// The link to a Gitea comment belongs to the source workspace's
+		// instance and must not survive an export/import round-trip.
+		delete(row, "gitea_comment_id")
 	case "shared_links":
 		delete(row, "token")
 		row["is_active"] = false

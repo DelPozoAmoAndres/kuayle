@@ -15,6 +15,7 @@ type UserRepo interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error)
 	GetByEmail(ctx context.Context, email string) (*domain.User, error)
 	Update(ctx context.Context, user *domain.User) error
+	GetWorkspaceMemberByGiteaLogin(ctx context.Context, workspaceID uuid.UUID, login string) (*domain.User, error)
 }
 
 type AISettingsRepo interface {
@@ -47,27 +48,15 @@ type WorkspaceRepo interface {
 	CountMembersByRole(ctx context.Context, workspaceID uuid.UUID, role string) (int, error)
 }
 
-type TeamRepo interface {
-	Create(ctx context.Context, team *domain.Team) error
-	GetByID(ctx context.Context, id uuid.UUID) (*domain.Team, error)
-	ListByWorkspace(ctx context.Context, workspaceID uuid.UUID) ([]domain.Team, error)
-	Update(ctx context.Context, team *domain.Team) error
-	Delete(ctx context.Context, id uuid.UUID) error
-	AddMember(ctx context.Context, member *domain.TeamMember) error
-	GetMember(ctx context.Context, teamID, userID uuid.UUID) (*domain.TeamMember, error)
-	ListMembers(ctx context.Context, teamID uuid.UUID) ([]domain.TeamMember, error)
-	RemoveMember(ctx context.Context, teamID, userID uuid.UUID) error
-}
-
 type IssueRepo interface {
 	Create(ctx context.Context, tx *sqlx.Tx, issue *domain.Issue) error
-	NextNumber(ctx context.Context, tx *sqlx.Tx, teamID *uuid.UUID) (int, error)
+	NextNumber(ctx context.Context, tx *sqlx.Tx, workspaceID uuid.UUID, prefix string) (int, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.Issue, error)
 	GetByIdentifier(ctx context.Context, workspaceID uuid.UUID, identifier string) (*domain.Issue, error)
 	GetByGiteaIssueIndex(ctx context.Context, workspaceID uuid.UUID, instanceID uuid.UUID, issueIndex int64) (*domain.Issue, error)
 	List(ctx context.Context, workspaceID uuid.UUID, params dto.IssueFilterParams) ([]domain.Issue, int, error)
 	Update(ctx context.Context, issue *domain.Issue) error
-	UpdateTeam(ctx context.Context, tx *sqlx.Tx, issueID uuid.UUID, teamID *uuid.UUID, number int, identifier string) error
+	UpdateProjectKey(ctx context.Context, tx *sqlx.Tx, issueID uuid.UUID, projectID *uuid.UUID, number int, identifier string) error
 	Delete(ctx context.Context, id uuid.UUID) error
 	SetLabels(ctx context.Context, issueID uuid.UUID, labelIDs []uuid.UUID) error
 	GetLabels(ctx context.Context, issueID uuid.UUID) ([]domain.Label, error)
@@ -80,7 +69,7 @@ type IssueRepo interface {
 	CountSubIssuesForIssues(ctx context.Context, issueIDs []uuid.UUID) (map[uuid.UUID]domain.SubIssueCount, error)
 	WouldCreateCycle(ctx context.Context, issueID, parentID uuid.UUID) (bool, error)
 	CycleIsActive(ctx context.Context, cycleID uuid.UUID) (bool, error)
-	BulkUpdate(ctx context.Context, workspaceID uuid.UUID, issueIDs []uuid.UUID, status *string, priority *int, assigneeID *uuid.UUID, statusID *uuid.UUID, cycleID *uuid.UUID, cycleSet bool) (int, error)
+	BulkUpdate(ctx context.Context, workspaceID uuid.UUID, issueIDs []uuid.UUID, status *string, priority *int, assigneeID *uuid.UUID, statusID *uuid.UUID) (int, error)
 	BulkDelete(ctx context.Context, workspaceID uuid.UUID, issueIDs []uuid.UUID) (int, error)
 	BeginTx(ctx context.Context) (*sqlx.Tx, error)
 }
@@ -104,6 +93,10 @@ type CommentRepo interface {
 	ListByIssue(ctx context.Context, issueID uuid.UUID) ([]domain.Comment, error)
 	ListReplies(ctx context.Context, parentID uuid.UUID) ([]domain.Comment, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.Comment, error)
+	GetByGiteaCommentID(ctx context.Context, giteaCommentID int64) (*domain.Comment, error)
+	Update(ctx context.Context, id uuid.UUID, body string) error
+	Delete(ctx context.Context, id uuid.UUID) error
+	SetGiteaCommentID(ctx context.Context, id uuid.UUID, giteaCommentID int64) error
 	Resolve(ctx context.Context, id uuid.UUID) error
 	Reopen(ctx context.Context, id uuid.UUID) error
 }
@@ -112,7 +105,6 @@ type ProjectRepo interface {
 	Create(ctx context.Context, project *domain.Project) error
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.Project, error)
 	ListByWorkspace(ctx context.Context, workspaceID uuid.UUID) ([]domain.Project, error)
-	ListByTeam(ctx context.Context, teamID uuid.UUID) ([]domain.Project, error)
 	Update(ctx context.Context, project *domain.Project) error
 	Delete(ctx context.Context, id uuid.UUID) error
 	IssueStats(ctx context.Context, projectID uuid.UUID) (total int, completed int, cancelled int, err error)
@@ -143,22 +135,6 @@ type ViewRepo interface {
 	Delete(ctx context.Context, id uuid.UUID) error
 }
 
-type CycleRepo interface {
-	Create(ctx context.Context, cycle *domain.Cycle) error
-	GetByID(ctx context.Context, id uuid.UUID) (*domain.Cycle, error)
-	ListByTeam(ctx context.Context, teamID uuid.UUID) ([]domain.Cycle, error)
-	NextNumber(ctx context.Context, teamID uuid.UUID) (int, error)
-	Update(ctx context.Context, cycle *domain.Cycle) error
-	Delete(ctx context.Context, id uuid.UUID) error
-	IssueStats(ctx context.Context, cycleID uuid.UUID) (total int, completed int, cancelled int, err error)
-	BurndownData(ctx context.Context, cycleID uuid.UUID, startDate, endDate time.Time) ([]dto.BurndownPoint, error)
-	ExistsByName(ctx context.Context, teamID uuid.UUID, name string) (bool, error)
-	HasOverlap(ctx context.Context, teamID uuid.UUID, startDate, endDate time.Time, excludeID *uuid.UUID) (bool, error)
-	GetNextUpcoming(ctx context.Context, teamID uuid.UUID) (*domain.Cycle, error)
-	CarryOverIssues(ctx context.Context, fromCycleID, toCycleID uuid.UUID) (int, error)
-	VelocityData(ctx context.Context, teamID uuid.UUID, limit int) ([]dto.VelocityPoint, error)
-}
-
 type IssueRelationRepo interface {
 	Create(ctx context.Context, rel *domain.IssueRelation) error
 	ListByIssue(ctx context.Context, issueID uuid.UUID) ([]domain.IssueRelation, error)
@@ -168,15 +144,15 @@ type IssueRelationRepo interface {
 	DeleteByIssues(ctx context.Context, issueID, relatedIssueID uuid.UUID, relType domain.IssueRelationType) error
 }
 
-type TeamStatusRepo interface {
-	Create(ctx context.Context, status *domain.TeamStatus) error
-	GetByID(ctx context.Context, id uuid.UUID) (*domain.TeamStatus, error)
-	GetByIDs(ctx context.Context, ids []uuid.UUID) ([]domain.TeamStatus, error)
-	GetByTeamAndSlug(ctx context.Context, teamID uuid.UUID, slug string) (*domain.TeamStatus, error)
-	ListByTeam(ctx context.Context, teamID uuid.UUID) ([]domain.TeamStatus, error)
-	Update(ctx context.Context, status *domain.TeamStatus) error
+type StatusRepo interface {
+	Create(ctx context.Context, status *domain.WorkspaceStatus) error
+	GetByID(ctx context.Context, id uuid.UUID) (*domain.WorkspaceStatus, error)
+	GetByIDs(ctx context.Context, ids []uuid.UUID) ([]domain.WorkspaceStatus, error)
+	GetByWorkspaceAndSlug(ctx context.Context, workspaceID uuid.UUID, slug string) (*domain.WorkspaceStatus, error)
+	ListByWorkspace(ctx context.Context, workspaceID uuid.UUID) ([]domain.WorkspaceStatus, error)
+	Update(ctx context.Context, status *domain.WorkspaceStatus) error
 	Delete(ctx context.Context, id uuid.UUID) error
-	NextPosition(ctx context.Context, teamID uuid.UUID) (int, error)
+	NextPosition(ctx context.Context, workspaceID uuid.UUID) (int, error)
 }
 
 type FavoriteRepo interface {
@@ -253,6 +229,7 @@ type GiteaRepo interface {
 	CreateRepo(ctx context.Context, repo *domain.GiteaRepoModel) error
 	ListReposByWorkspace(ctx context.Context, workspaceID uuid.UUID) ([]domain.GiteaRepoModel, error)
 	GetRepoByGiteaID(ctx context.Context, workspaceID uuid.UUID, giteaRepoID int64) (*domain.GiteaRepoModel, error)
+	GetRepoByGiteaIDGlobal(ctx context.Context, giteaRepoID int64) (*domain.GiteaRepoModel, error)
 	DeleteRepo(ctx context.Context, id uuid.UUID) error
 
 	UpsertPullRequest(ctx context.Context, pr *domain.GiteaPullRequest) error

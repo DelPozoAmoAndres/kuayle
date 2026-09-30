@@ -16,7 +16,7 @@
 	import { Checkbox } from '$lib/components/ui/checkbox';
 	import * as Popover from '$lib/components/ui/popover';
 	import { Globe, Search, CircleDashed, Signal, Plus, X, ChevronDown, ChevronRight } from 'lucide-svelte';
-	import type { StatusCategory } from '$lib/types/team-status';
+	import type { StatusCategory } from '$lib/types/status';
 
 	let meta = $state<PublicShareMeta | null>(null);
 	let issues = $state<PublicIssue[]>([]);

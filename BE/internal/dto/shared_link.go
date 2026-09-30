@@ -6,7 +6,7 @@ import (
 )
 
 type CreateSharedLinkRequest struct {
-	Scope              string          `json:"scope" validate:"required,oneof=workspace team project view"`
+	Scope              string          `json:"scope" validate:"required,oneof=workspace project view"`
 	ScopeID            *string         `json:"scope_id" validate:"omitempty,uuid"`
 	Filters            json.RawMessage `json:"filters"`
 	IncludeDescription bool            `json:"include_description"`

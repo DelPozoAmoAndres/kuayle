@@ -157,15 +157,16 @@ func (h *GiteaHandler) HandleWebhook(c echo.Context) error {
 		return c.NoContent(http.StatusBadRequest)
 	}
 
-	// Verify signature (service handles empty signature when no secret configured)
-	if !h.gtSvc.VerifyWebhookSignature(c.Request().Context(), uuid.Nil, body, signature) {
-		return c.NoContent(http.StatusUnauthorized)
-	}
-
 	// Resolve workspace from the payload
 	workspaceID, err := h.gtSvc.ResolveWorkspaceFromPayload(c.Request().Context(), body)
 	if err != nil || workspaceID == uuid.Nil {
 		return c.NoContent(http.StatusNotFound)
+	}
+
+	// Verify the signature against this workspace's webhook secret
+	// (service skips verification when no secret is configured)
+	if !h.gtSvc.VerifyWebhookSignature(c.Request().Context(), workspaceID, body, signature) {
+		return c.NoContent(http.StatusUnauthorized)
 	}
 
 	if err := h.gtSvc.HandleWebhookEvent(c.Request().Context(), workspaceID, eventType, body); err != nil {

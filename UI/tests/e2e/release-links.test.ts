@@ -58,7 +58,6 @@ test('retries and restricts release manifest links to the Kuayle GitHub reposito
 					dark_theme: 'dark',
 					workflow_sort_mode: 'default',
 					workflow_sort_order: ['backlog', 'unstarted', 'started', 'completed', 'cancelled'],
-					team_workflow_sort_overrides: {},
 					issues_group_by: 'status'
 				}
 			});
@@ -78,7 +77,7 @@ test('retries and restricts release manifest links to the Kuayle GitHub reposito
 				}
 			});
 		}
-		if (['teams', 'projects', 'labels', 'members', 'views'].some((part) => path === `/api/workspaces/test/${part}`)) {
+		if (['statuses', 'projects', 'labels', 'members', 'views'].some((part) => path === `/api/workspaces/test/${part}`)) {
 			return route.fulfill({ json: [] });
 		}
 		if (path === '/api/notifications') {

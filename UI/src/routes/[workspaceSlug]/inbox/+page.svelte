@@ -74,8 +74,6 @@
 				return m['inbox.type.due_date_changed']();
 			case 'label_added':
 				return m['inbox.type.label_added']();
-			case 'cycle_changed':
-				return m['inbox.type.cycle_changed']();
 			default:
 				return normalizedType.replace(/_/g, ' ');
 		}
@@ -90,8 +88,7 @@
 		issue_created: { icon: CirclePlus, color: '#4ade80', bg: 'rgba(34,197,94,0.18)' },
 		issue_updated: { icon: Pencil, color: '#60a5fa', bg: 'rgba(59,130,246,0.18)' },
 		due_date_changed: { icon: CalendarDays, color: '#fbbf24', bg: 'rgba(245,158,11,0.18)' },
-		label_added: { icon: Tag, color: '#f472b6', bg: 'rgba(236,72,153,0.18)' },
-		cycle_changed: { icon: RefreshCw, color: '#2dd4bf', bg: 'rgba(20,184,166,0.18)' }
+		label_added: { icon: Tag, color: '#f472b6', bg: 'rgba(236,72,153,0.18)' }
 	};
 
 	function getTypeStyle(type: string) {

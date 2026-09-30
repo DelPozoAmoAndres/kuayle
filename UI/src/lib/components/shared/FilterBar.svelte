@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { IssuePriority } from '$lib/types/issue';
 	import { getPriorityLabel, getPriorityLabels } from '$lib/types/issue';
-	import { teamStatusesState } from '$lib/features/issues/team-statuses.state.svelte';
+	import { statusesState } from '$lib/features/issues/statuses.state.svelte';
 	import IssueStatusIcon from '$lib/features/issues/IssueStatusIcon.svelte';
 	import IssuePriorityIcon from '$lib/features/issues/IssuePriorityIcon.svelte';
 	import * as Popover from '$lib/components/ui/popover';
@@ -29,7 +29,7 @@
 
 	let statusLabel = $derived.by(() => {
 		if (!filters.status) return 'All statuses';
-		const ts = teamStatusesState.statusById.get(filters.status);
+		const ts = statusesState.statusById.get(filters.status);
 		return ts ? ts.name : filters.status;
 	});
 	let priorityLabel = $derived(filters.priority ? getPriorityLabel(Number(filters.priority) as IssuePriority) : 'All priorities');
@@ -40,7 +40,7 @@
 		<Popover.Trigger>
 			<button class="flex items-center gap-1.5 rounded-md border border-[var(--app-border)] bg-[var(--color-bg-secondary)] px-2 py-1 text-xs text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)]">
 				{#if filters.status}
-					{@const ts = teamStatusesState.statusById.get(filters.status)}
+					{@const ts = statusesState.statusById.get(filters.status)}
 					<IssueStatusIcon category={ts?.category} color={ts?.color} size={12} />
 				{/if}
 				{statusLabel}
@@ -53,7 +53,7 @@
 			>
 				All statuses
 			</button>
-			{#each teamStatusesState.statusOrder as ts}
+			{#each statusesState.statusOrder as ts}
 				<button
 					onclick={() => { setFilter('status', ts.id); statusOpen = false; }}
 					class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] {filters.status === ts.id ? 'bg-[var(--color-bg-hover)]' : ''}"

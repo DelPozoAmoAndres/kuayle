@@ -14,9 +14,9 @@ import (
 func TestIssueRepositoryPostgres(t *testing.T) {
 	databaseURL := os.Getenv("ISSUE_TEST_DATABASE_URL")
 	workspaceID := os.Getenv("ISSUE_TEST_WORKSPACE_ID")
-	teamID := os.Getenv("ISSUE_TEST_TEAM_ID")
+	projectID := os.Getenv("ISSUE_TEST_PROJECT_ID")
 	identifier := os.Getenv("ISSUE_TEST_IDENTIFIER")
-	if databaseURL == "" || workspaceID == "" || teamID == "" || identifier == "" {
+	if databaseURL == "" || workspaceID == "" || projectID == "" || identifier == "" {
 		t.Skip("issue repository integration test environment is not set")
 	}
 
@@ -34,22 +34,22 @@ func TestIssueRepositoryPostgres(t *testing.T) {
 	}
 
 	issues, total, err := repo.List(context.Background(), workspaceUUID, dto.IssueFilterParams{
-		TeamID:  teamID,
-		GroupBy: "status",
-		Sort:    "sort_order",
-		Order:   "asc",
+		ProjectID: projectID,
+		GroupBy:   "status",
+		Sort:      "sort_order",
+		Order:     "asc",
 	})
 	if err != nil || total == 0 || len(issues) == 0 {
 		t.Fatalf("List() returned %d issues of %d, error = %v", len(issues), total, err)
 	}
 
 	analyticsRepo := NewAnalyticsRepository(db)
-	overview, err := analyticsRepo.Overview(context.Background(), workspaceID, teamID)
+	overview, err := analyticsRepo.Overview(context.Background(), workspaceID)
 	if err != nil || overview.TotalIssues == 0 {
-		t.Fatalf("team Overview() result = %#v, error = %v", overview, err)
+		t.Fatalf("Overview() result = %#v, error = %v", overview, err)
 	}
-	distribution, err := analyticsRepo.Distribution(context.Background(), workspaceID, teamID)
+	distribution, err := analyticsRepo.Distribution(context.Background(), workspaceID)
 	if err != nil || len(distribution.ByStatus) == 0 {
-		t.Fatalf("team Distribution() result = %#v, error = %v", distribution, err)
+		t.Fatalf("Distribution() result = %#v, error = %v", distribution, err)
 	}
 }

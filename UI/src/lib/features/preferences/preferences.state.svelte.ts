@@ -1,18 +1,12 @@
 import { getPreferences, updatePreferences, type IssuesGroupByPreference } from '$lib/api/preferences';
-import { CATEGORY_ORDER, type StatusCategory } from '$lib/types/team-status';
+import { CATEGORY_ORDER, type StatusCategory } from '$lib/types/status';
 
 type FontSize = 'small' | 'default' | 'large';
 type ThemeMode = 'system' | 'light' | 'dark';
 type LightTheme = 'light' | 'rose-light' | 'blue-light';
 type DarkTheme = 'dark' | 'dark-gray' | 'amethyst-dark' | 'emerald-dark' | 'cyber-77' | 'blade-49' | 'pipboy';
 export type WorkflowSortMode = 'default' | 'active-first' | 'custom';
-export type TeamWorkflowSortMode = WorkflowSortMode | 'inherit';
 export type GroupByField = Exclude<IssuesGroupByPreference, 'none'> | null;
-
-export interface TeamWorkflowSortOverride {
-	mode: TeamWorkflowSortMode;
-	workflowSortOrder?: StatusCategory[];
-}
 
 interface PreferencesData {
 	fontSize: FontSize;
@@ -22,7 +16,6 @@ interface PreferencesData {
 	darkTheme: DarkTheme;
 	workflowSortMode: WorkflowSortMode;
 	workflowSortOrder: StatusCategory[];
-	teamWorkflowSortOverrides: Record<string, TeamWorkflowSortOverride>;
 	recentDueDates: string[];
 	issuesGroupBy: GroupByField;
 	localDirty?: boolean;
@@ -49,7 +42,6 @@ class PreferencesState {
 	darkTheme = $state<DarkTheme>('dark');
 	workflowSortMode = $state<WorkflowSortMode>('default');
 	workflowSortOrder = $state<StatusCategory[]>([...DEFAULT_WORKFLOW_SORT_ORDER]);
-	teamWorkflowSortOverrides = $state<Record<string, TeamWorkflowSortOverride>>({});
 	recentDueDates = $state<string[]>([]);
 	issuesGroupBy = $state<GroupByField>('status');
 
@@ -114,7 +106,6 @@ class PreferencesState {
 			if (data.darkTheme) this.darkTheme = data.darkTheme;
 			if (data.workflowSortMode) this.workflowSortMode = data.workflowSortMode;
 			if (data.workflowSortOrder) this.workflowSortOrder = normalizeWorkflowSortOrder(data.workflowSortOrder);
-			if (data.teamWorkflowSortOverrides) this.teamWorkflowSortOverrides = normalizeTeamOverrides(data.teamWorkflowSortOverrides);
 			if (data.recentDueDates) this.recentDueDates = normalizeRecentDueDates(data.recentDueDates);
 			if (data.issuesGroupBy !== undefined) this.issuesGroupBy = normalizeIssuesGroupBy(data.issuesGroupBy);
 			if (data.localDirty !== undefined) this.localDirty = data.localDirty;
@@ -141,17 +132,6 @@ class PreferencesState {
 			this.darkTheme = data.dark_theme as DarkTheme;
 			this.workflowSortMode = (data.workflow_sort_mode ?? 'default') as WorkflowSortMode;
 			this.workflowSortOrder = normalizeWorkflowSortOrder(data.workflow_sort_order);
-			this.teamWorkflowSortOverrides = normalizeTeamOverrides(
-				Object.fromEntries(
-					Object.entries(data.team_workflow_sort_overrides ?? {}).map(([key, override]: [string, any]) => [
-						key,
-						{
-							mode: override.mode,
-							workflowSortOrder: override.workflow_sort_order
-						}
-					])
-				)
-			);
 			this.recentDueDates = normalizeRecentDueDates(data.recent_due_dates ?? []);
 			this.issuesGroupBy = normalizeIssuesGroupBy(data.issues_group_by);
 			this.localDirty = false;
@@ -170,7 +150,6 @@ class PreferencesState {
 			darkTheme: this.darkTheme,
 			workflowSortMode: this.workflowSortMode,
 			workflowSortOrder: this.workflowSortOrder,
-			teamWorkflowSortOverrides: this.teamWorkflowSortOverrides,
 			recentDueDates: this.recentDueDates,
 			issuesGroupBy: this.issuesGroupBy,
 			localDirty: this.localDirty
@@ -219,15 +198,6 @@ class PreferencesState {
 			dark_theme: this.darkTheme,
 			workflow_sort_mode: this.workflowSortMode,
 			workflow_sort_order: this.workflowSortOrder,
-			team_workflow_sort_overrides: Object.fromEntries(
-				Object.entries(this.teamWorkflowSortOverrides).map(([key, override]) => [
-					key,
-					{
-						mode: override.mode,
-						workflow_sort_order: override.workflowSortOrder
-					}
-				])
-			),
 			recent_due_dates: this.recentDueDates,
 			issues_group_by: toIssuesGroupByPreference(this.issuesGroupBy)
 		};
@@ -269,37 +239,11 @@ class PreferencesState {
 		this.persist();
 	}
 
-	setTeamWorkflowSortOverride(workspaceSlug: string, teamId: string, override: TeamWorkflowSortOverride) {
-		const key = teamWorkflowSortKey(workspaceSlug, teamId);
-		this.teamWorkflowSortOverrides = {
-			...this.teamWorkflowSortOverrides,
-			[key]: {
-				mode: override.mode,
-				workflowSortOrder: override.workflowSortOrder ? normalizeWorkflowSortOrder(override.workflowSortOrder) : undefined
-			}
-		};
-		this.persist();
-	}
-
-	getTeamWorkflowSortOverride(workspaceSlug: string, teamId: string): TeamWorkflowSortOverride {
-		return this.teamWorkflowSortOverrides[teamWorkflowSortKey(workspaceSlug, teamId)] ?? { mode: 'inherit' };
-	}
-
-	getWorkflowSortMode(workspaceSlug?: string, teamId?: string): WorkflowSortMode {
-		if (workspaceSlug && teamId) {
-			const override = this.getTeamWorkflowSortOverride(workspaceSlug, teamId);
-			if (override.mode !== 'inherit') return override.mode;
-		}
+	getWorkflowSortMode(): WorkflowSortMode {
 		return this.workflowSortMode;
 	}
 
-	getWorkflowSortOrder(workspaceSlug?: string, teamId?: string): StatusCategory[] {
-		if (workspaceSlug && teamId) {
-			const override = this.getTeamWorkflowSortOverride(workspaceSlug, teamId);
-			if (override.mode === 'active-first') return [...ACTIVE_FIRST_WORKFLOW_SORT_ORDER];
-			if (override.mode === 'custom') return normalizeWorkflowSortOrder(override.workflowSortOrder);
-			if (override.mode === 'default') return [...DEFAULT_WORKFLOW_SORT_ORDER];
-		}
+	getWorkflowSortOrder(): StatusCategory[] {
 		if (this.workflowSortMode === 'active-first') return [...ACTIVE_FIRST_WORKFLOW_SORT_ORDER];
 		if (this.workflowSortMode === 'custom') return normalizeWorkflowSortOrder(this.workflowSortOrder);
 		return [...DEFAULT_WORKFLOW_SORT_ORDER];
@@ -317,10 +261,6 @@ class PreferencesState {
 	}
 }
 
-function teamWorkflowSortKey(workspaceSlug: string, teamId: string) {
-	return `${workspaceSlug}/${teamId}`;
-}
-
 function normalizeWorkflowSortOrder(order?: string[] | StatusCategory[]): StatusCategory[] {
 	if (!order) return [...DEFAULT_WORKFLOW_SORT_ORDER];
 	const valid = new Set<StatusCategory>(DEFAULT_WORKFLOW_SORT_ORDER);
@@ -335,18 +275,6 @@ function normalizeWorkflowSortOrder(order?: string[] | StatusCategory[]): Status
 		if (!normalized.includes(category)) normalized.push(category);
 	}
 	return normalized.slice(0, DEFAULT_WORKFLOW_SORT_ORDER.length);
-}
-
-function normalizeTeamOverrides(overrides: Record<string, TeamWorkflowSortOverride>) {
-	return Object.fromEntries(
-		Object.entries(overrides).map(([key, override]) => [
-			key,
-			{
-				mode: override.mode ?? 'inherit',
-				workflowSortOrder: override.workflowSortOrder ? normalizeWorkflowSortOrder(override.workflowSortOrder) : undefined
-			}
-		])
-	) as Record<string, TeamWorkflowSortOverride>;
 }
 
 function normalizeRecentDueDates(dates: string[]) {

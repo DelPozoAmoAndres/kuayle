@@ -103,7 +103,7 @@ func (m *mockWorkspaceRepo) CountMembersByRole(ctx context.Context, workspaceID 
 func TestWorkspaceService_Create_Happy(t *testing.T) {
 	wsRepo := new(mockWorkspaceRepo)
 	userRepo := new(mockUserRepo)
-	svc := NewWorkspaceService(wsRepo, userRepo)
+	svc := NewWorkspaceService(wsRepo, userRepo, nil)
 
 	ctx := context.Background()
 	userID := uuid.New()
@@ -148,7 +148,7 @@ func TestWorkspaceService_Create_Happy(t *testing.T) {
 func TestWorkspaceService_Create_TransactionalCreateFails(t *testing.T) {
 	wsRepo := new(mockWorkspaceRepo)
 	userRepo := new(mockUserRepo)
-	svc := NewWorkspaceService(wsRepo, userRepo)
+	svc := NewWorkspaceService(wsRepo, userRepo, nil)
 
 	ctx := context.Background()
 	errCreate := errors.New("label insert failed")
@@ -168,7 +168,7 @@ func TestWorkspaceService_Create_TransactionalCreateFails(t *testing.T) {
 func TestWorkspaceService_Create_SlugTaken(t *testing.T) {
 	wsRepo := new(mockWorkspaceRepo)
 	userRepo := new(mockUserRepo)
-	svc := NewWorkspaceService(wsRepo, userRepo)
+	svc := NewWorkspaceService(wsRepo, userRepo, nil)
 
 	ctx := context.Background()
 	userID := uuid.New()
@@ -186,7 +186,7 @@ func TestWorkspaceService_Create_SlugTaken(t *testing.T) {
 func TestWorkspaceService_Create_SlugLookupFails(t *testing.T) {
 	wsRepo := new(mockWorkspaceRepo)
 	userRepo := new(mockUserRepo)
-	svc := NewWorkspaceService(wsRepo, userRepo)
+	svc := NewWorkspaceService(wsRepo, userRepo, nil)
 
 	ctx := context.Background()
 	lookupErr := errors.New("database unavailable")
@@ -202,7 +202,7 @@ func TestWorkspaceService_Create_SlugLookupFails(t *testing.T) {
 func TestWorkspaceService_Create_InsertSlugConflict(t *testing.T) {
 	wsRepo := new(mockWorkspaceRepo)
 	userRepo := new(mockUserRepo)
-	svc := NewWorkspaceService(wsRepo, userRepo)
+	svc := NewWorkspaceService(wsRepo, userRepo, nil)
 
 	ctx := context.Background()
 	wsRepo.On("GetBySlug", ctx, "test").Return(nil, nil)
@@ -217,7 +217,7 @@ func TestWorkspaceService_Create_InsertSlugConflict(t *testing.T) {
 func TestWorkspaceService_ListByUser(t *testing.T) {
 	wsRepo := new(mockWorkspaceRepo)
 	userRepo := new(mockUserRepo)
-	svc := NewWorkspaceService(wsRepo, userRepo)
+	svc := NewWorkspaceService(wsRepo, userRepo, nil)
 
 	ctx := context.Background()
 	userID := uuid.New()
@@ -237,7 +237,7 @@ func TestWorkspaceService_ListByUser(t *testing.T) {
 func TestWorkspaceService_GetBySlug(t *testing.T) {
 	wsRepo := new(mockWorkspaceRepo)
 	userRepo := new(mockUserRepo)
-	svc := NewWorkspaceService(wsRepo, userRepo)
+	svc := NewWorkspaceService(wsRepo, userRepo, nil)
 
 	ctx := context.Background()
 	ws := &domain.Workspace{ID: uuid.New(), Name: "Test", Slug: "test"}
@@ -252,7 +252,7 @@ func TestWorkspaceService_GetBySlug(t *testing.T) {
 func TestWorkspaceService_Update(t *testing.T) {
 	wsRepo := new(mockWorkspaceRepo)
 	userRepo := new(mockUserRepo)
-	svc := NewWorkspaceService(wsRepo, userRepo)
+	svc := NewWorkspaceService(wsRepo, userRepo, nil)
 
 	ctx := context.Background()
 	ownerID := uuid.New()
@@ -270,7 +270,7 @@ func TestWorkspaceService_Update(t *testing.T) {
 func TestWorkspaceService_Update_NotOwner(t *testing.T) {
 	wsRepo := new(mockWorkspaceRepo)
 	userRepo := new(mockUserRepo)
-	svc := NewWorkspaceService(wsRepo, userRepo)
+	svc := NewWorkspaceService(wsRepo, userRepo, nil)
 
 	ctx := context.Background()
 	ownerID := uuid.New()
@@ -288,7 +288,7 @@ func TestWorkspaceService_Update_NotOwner(t *testing.T) {
 func TestWorkspaceService_Update_Fields(t *testing.T) {
 	wsRepo := new(mockWorkspaceRepo)
 	userRepo := new(mockUserRepo)
-	svc := NewWorkspaceService(wsRepo, userRepo)
+	svc := NewWorkspaceService(wsRepo, userRepo, nil)
 
 	ctx := context.Background()
 	ownerID := uuid.New()
@@ -308,7 +308,7 @@ func TestWorkspaceService_Update_Fields(t *testing.T) {
 func TestWorkspaceService_Update_ClearLogoURL(t *testing.T) {
 	wsRepo := new(mockWorkspaceRepo)
 	userRepo := new(mockUserRepo)
-	svc := NewWorkspaceService(wsRepo, userRepo)
+	svc := NewWorkspaceService(wsRepo, userRepo, nil)
 
 	ctx := context.Background()
 	ownerID := uuid.New()
@@ -328,7 +328,7 @@ func TestWorkspaceService_Update_ClearLogoURL(t *testing.T) {
 func TestWorkspaceService_Update_TrimLogoURL(t *testing.T) {
 	wsRepo := new(mockWorkspaceRepo)
 	userRepo := new(mockUserRepo)
-	svc := NewWorkspaceService(wsRepo, userRepo)
+	svc := NewWorkspaceService(wsRepo, userRepo, nil)
 
 	ctx := context.Background()
 	ownerID := uuid.New()
@@ -349,7 +349,7 @@ func TestWorkspaceService_Update_TrimLogoURL(t *testing.T) {
 func TestWorkspaceService_Delete_Owner(t *testing.T) {
 	wsRepo := new(mockWorkspaceRepo)
 	userRepo := new(mockUserRepo)
-	svc := NewWorkspaceService(wsRepo, userRepo)
+	svc := NewWorkspaceService(wsRepo, userRepo, nil)
 
 	ctx := context.Background()
 	ownerID := uuid.New()
@@ -366,7 +366,7 @@ func TestWorkspaceService_Delete_Owner(t *testing.T) {
 func TestWorkspaceService_Delete_NotOwner(t *testing.T) {
 	wsRepo := new(mockWorkspaceRepo)
 	userRepo := new(mockUserRepo)
-	svc := NewWorkspaceService(wsRepo, userRepo)
+	svc := NewWorkspaceService(wsRepo, userRepo, nil)
 
 	ctx := context.Background()
 	ownerID := uuid.New()
@@ -383,7 +383,7 @@ func TestWorkspaceService_Delete_NotOwner(t *testing.T) {
 func TestWorkspaceService_Delete_NotFound(t *testing.T) {
 	wsRepo := new(mockWorkspaceRepo)
 	userRepo := new(mockUserRepo)
-	svc := NewWorkspaceService(wsRepo, userRepo)
+	svc := NewWorkspaceService(wsRepo, userRepo, nil)
 
 	ctx := context.Background()
 	wsRepo.On("GetBySlug", ctx, "missing").Return(nil, nil)
@@ -396,7 +396,7 @@ func TestWorkspaceService_Delete_NotFound(t *testing.T) {
 func TestWorkspaceService_Delete_BlocksActiveDevMachines(t *testing.T) {
 	wsRepo := new(mockWorkspaceRepo)
 	userRepo := new(mockUserRepo)
-	svc := NewWorkspaceService(wsRepo, userRepo)
+	svc := NewWorkspaceService(wsRepo, userRepo, nil)
 	ctx := context.Background()
 	ownerID := uuid.New()
 	ws := &domain.Workspace{ID: uuid.New(), Slug: "test", OwnerID: ownerID}
@@ -411,7 +411,7 @@ func TestWorkspaceService_Delete_BlocksActiveDevMachines(t *testing.T) {
 func TestWorkspaceService_DeleteReportsEnvironmentCleanup(t *testing.T) {
 	wsRepo := new(mockWorkspaceRepo)
 	userRepo := new(mockUserRepo)
-	svc := NewWorkspaceService(wsRepo, userRepo)
+	svc := NewWorkspaceService(wsRepo, userRepo, nil)
 	ctx := context.Background()
 	ownerID := uuid.New()
 	ws := &domain.Workspace{ID: uuid.New(), Slug: "test", OwnerID: ownerID}
@@ -426,7 +426,7 @@ func TestWorkspaceService_DeleteReportsEnvironmentCleanup(t *testing.T) {
 func TestWorkspaceService_UpdateMemberRole_PreventsOwnerDemotion(t *testing.T) {
 	wsRepo := new(mockWorkspaceRepo)
 	userRepo := new(mockUserRepo)
-	svc := NewWorkspaceService(wsRepo, userRepo)
+	svc := NewWorkspaceService(wsRepo, userRepo, nil)
 
 	ctx := context.Background()
 	workspaceID := uuid.New()
@@ -444,7 +444,7 @@ func TestWorkspaceService_UpdateMemberRole_PreventsOwnerDemotion(t *testing.T) {
 func TestWorkspaceService_UpdateMemberRole_PreventsOwnershipTransfer(t *testing.T) {
 	wsRepo := new(mockWorkspaceRepo)
 	userRepo := new(mockUserRepo)
-	svc := NewWorkspaceService(wsRepo, userRepo)
+	svc := NewWorkspaceService(wsRepo, userRepo, nil)
 
 	ctx := context.Background()
 	workspaceID := uuid.New()
@@ -463,7 +463,7 @@ func TestWorkspaceService_UpdateMemberRole_PreventsOwnershipTransfer(t *testing.
 func TestWorkspaceService_UpdateMemberRole_AllowsNonOwnerRoleChange(t *testing.T) {
 	wsRepo := new(mockWorkspaceRepo)
 	userRepo := new(mockUserRepo)
-	svc := NewWorkspaceService(wsRepo, userRepo)
+	svc := NewWorkspaceService(wsRepo, userRepo, nil)
 
 	ctx := context.Background()
 	workspaceID := uuid.New()
@@ -482,7 +482,7 @@ func TestWorkspaceService_UpdateMemberRole_AllowsNonOwnerRoleChange(t *testing.T
 func TestWorkspaceService_InviteMember_Happy(t *testing.T) {
 	wsRepo := new(mockWorkspaceRepo)
 	userRepo := new(mockUserRepo)
-	svc := NewWorkspaceService(wsRepo, userRepo)
+	svc := NewWorkspaceService(wsRepo, userRepo, nil)
 
 	ctx := context.Background()
 	wsID := uuid.New()
@@ -503,7 +503,7 @@ func TestWorkspaceService_InviteMember_Happy(t *testing.T) {
 func TestWorkspaceService_InviteMember_AlreadyMember(t *testing.T) {
 	wsRepo := new(mockWorkspaceRepo)
 	userRepo := new(mockUserRepo)
-	svc := NewWorkspaceService(wsRepo, userRepo)
+	svc := NewWorkspaceService(wsRepo, userRepo, nil)
 
 	ctx := context.Background()
 	wsID := uuid.New()

@@ -1,9 +1,5 @@
 package dto
 
-type AnalyticsScopeParams struct {
-	TeamID string `query:"team_id"`
-}
-
 type AnalyticsOverview struct {
 	TotalIssues       int     `json:"total_issues"`
 	OpenIssues        int     `json:"open_issues"`
@@ -47,7 +43,6 @@ type AnalyticsInsightsParams struct {
 	Segment          string  `query:"segment"`
 	From             string  `query:"from"`
 	To               string  `query:"to"`
-	TeamID           *string `query:"team_id"`
 	ProjectID        *string `query:"project_id"`
 	CycleID          *string `query:"cycle_id"`
 	AssigneeID       *string `query:"assignee_id"`
@@ -109,7 +104,6 @@ type AnalyticsBurnupParams struct {
 	From             string  `query:"from"`
 	To               string  `query:"to"`
 	Interval         string  `query:"interval"`
-	TeamID           *string `query:"team_id"`
 	ProjectID        *string `query:"project_id"`
 	CycleID          *string `query:"cycle_id"`
 	AssigneeID       *string `query:"assignee_id"`

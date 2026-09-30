@@ -1,11 +1,11 @@
 <script lang="ts">
 	import type { Issue } from '$lib/types/issue';
-	import type { TeamStatus } from '$lib/types/team-status';
+	import type { WorkspaceStatus } from '$lib/types/status';
 	import type { WorkspaceMember } from '$lib/types/workspace';
 	import type { Label } from '$lib/types/label';
 	import KanbanColumn from './KanbanColumn.svelte';
 	import { issuesState } from './issues.state.svelte';
-	import { teamStatusesState } from './team-statuses.state.svelte';
+	import { statusesState } from './statuses.state.svelte';
 
 	let {
 		issuesByStatus,
@@ -26,7 +26,7 @@
 
 	$effect(() => {
 		const copy: Record<string, Issue[]> = {};
-		for (const ts of teamStatusesState.statusOrder) {
+		for (const ts of statusesState.statusOrder) {
 			copy[ts.id] = [...(issuesByStatus[ts.id] ?? [])];
 		}
 		localByStatus = copy;
@@ -70,10 +70,10 @@
 </script>
 
 <div class="flex h-full gap-4 overflow-x-auto p-4">
-	{#each teamStatusesState.statusOrder as ts (ts.id)}
+	{#each statusesState.statusOrder as ts (ts.id)}
 		<KanbanColumn
 			statusId={ts.id}
-			teamStatus={ts}
+			status={ts}
 			issues={localByStatus[ts.id] ?? []}
 			{slug}
 			{members}

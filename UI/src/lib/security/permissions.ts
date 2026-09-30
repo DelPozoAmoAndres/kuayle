@@ -3,7 +3,6 @@ import type { Role } from './roles';
 const ROLE_PERMISSIONS: Record<Role, string[]> = {
 	owner: [
 		'workspace:manage',
-		'team:manage',
 		'issue:create',
 		'issue:read',
 		'issue:update',
@@ -12,11 +11,10 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
 		'project:manage',
 		'label:manage',
 		'member:invite',
-		'cycle:manage',
 		'view:manage'
 	],
 	admin: [
-		'team:manage',
+		'workspace:manage',
 		'issue:create',
 		'issue:read',
 		'issue:update',
@@ -25,7 +23,6 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
 		'project:manage',
 		'label:manage',
 		'member:invite',
-		'cycle:manage',
 		'view:manage'
 	],
 	member: [
@@ -35,7 +32,6 @@ const ROLE_PERMISSIONS: Record<Role, string[]> = {
 		'issue:delete_own',
 		'project:manage',
 		'label:manage',
-		'cycle:manage',
 		'view:manage'
 	],
 	guest: ['issue:read']

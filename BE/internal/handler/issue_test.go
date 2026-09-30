@@ -33,7 +33,7 @@ func (r *testIssueRepo) Create(_ context.Context, _ *sqlx.Tx, issue *domain.Issu
 	return nil
 }
 
-func (r *testIssueRepo) NextNumber(_ context.Context, _ *sqlx.Tx, _ *uuid.UUID) (int, error) {
+func (r *testIssueRepo) NextNumber(_ context.Context, _ *sqlx.Tx, _ uuid.UUID, _ string) (int, error) {
 	return len(r.issues) + 1, nil
 }
 
@@ -66,7 +66,7 @@ func (r *testIssueRepo) Update(_ context.Context, issue *domain.Issue) error {
 	return nil
 }
 
-func (r *testIssueRepo) UpdateTeam(_ context.Context, _ *sqlx.Tx, _ uuid.UUID, _ *uuid.UUID, _ int, _ string) error {
+func (r *testIssueRepo) UpdateProjectKey(_ context.Context, _ *sqlx.Tx, _ uuid.UUID, _ *uuid.UUID, _ int, _ string) error {
 	return nil
 }
 
@@ -142,7 +142,7 @@ func (r *testIssueRepo) CycleIsActive(_ context.Context, _ uuid.UUID) (bool, err
 	return false, nil
 }
 
-func (r *testIssueRepo) BulkUpdate(_ context.Context, _ uuid.UUID, _ []uuid.UUID, _ *string, _ *int, _ *uuid.UUID, _ *uuid.UUID, _ *uuid.UUID, _ bool) (int, error) {
+func (r *testIssueRepo) BulkUpdate(_ context.Context, _ uuid.UUID, _ []uuid.UUID, _ *string, _ *int, _ *uuid.UUID, _ *uuid.UUID) (int, error) {
 	return 0, nil
 }
 
@@ -170,62 +170,6 @@ func (r *testIssueRepo) GetByGiteaIssueIndex(_ context.Context, _ uuid.UUID, _ u
 	return nil, nil
 }
 
-type testTeamRepo struct {
-	teams map[uuid.UUID]*domain.Team
-}
-
-func newTestTeamRepo() *testTeamRepo {
-	return &testTeamRepo{teams: make(map[uuid.UUID]*domain.Team)}
-}
-
-func (r *testTeamRepo) Create(_ context.Context, team *domain.Team) error {
-	r.teams[team.ID] = team
-	return nil
-}
-
-func (r *testTeamRepo) GetByID(_ context.Context, id uuid.UUID) (*domain.Team, error) {
-	if team, ok := r.teams[id]; ok {
-		return team, nil
-	}
-	return nil, nil
-}
-
-func (r *testTeamRepo) ListByWorkspace(_ context.Context, wsID uuid.UUID) ([]domain.Team, error) {
-	var teams []domain.Team
-	for _, team := range r.teams {
-		if team.WorkspaceID == wsID {
-			teams = append(teams, *team)
-		}
-	}
-	return teams, nil
-}
-
-func (r *testTeamRepo) Update(_ context.Context, team *domain.Team) error {
-	r.teams[team.ID] = team
-	return nil
-}
-
-func (r *testTeamRepo) Delete(_ context.Context, id uuid.UUID) error {
-	delete(r.teams, id)
-	return nil
-}
-
-func (r *testTeamRepo) AddMember(_ context.Context, _ *domain.TeamMember) error {
-	return nil
-}
-
-func (r *testTeamRepo) GetMember(_ context.Context, _, _ uuid.UUID) (*domain.TeamMember, error) {
-	return nil, nil
-}
-
-func (r *testTeamRepo) ListMembers(_ context.Context, _ uuid.UUID) ([]domain.TeamMember, error) {
-	return nil, nil
-}
-
-func (r *testTeamRepo) RemoveMember(_ context.Context, _, _ uuid.UUID) error {
-	return nil
-}
-
 type testHistoryRepo struct{}
 
 func (r *testHistoryRepo) Create(_ context.Context, _, _ uuid.UUID, _ string, _, _ *string) error {
@@ -236,37 +180,37 @@ func (r *testHistoryRepo) ListByIssue(_ context.Context, _ uuid.UUID) ([]domain.
 	return nil, nil
 }
 
-type testTeamStatusRepo struct{}
+type testStatusRepo struct{}
 
-func (r *testTeamStatusRepo) Create(_ context.Context, _ *domain.TeamStatus) error {
+func (r *testStatusRepo) Create(_ context.Context, _ *domain.WorkspaceStatus) error {
 	return nil
 }
 
-func (r *testTeamStatusRepo) GetByID(_ context.Context, _ uuid.UUID) (*domain.TeamStatus, error) {
+func (r *testStatusRepo) GetByID(_ context.Context, _ uuid.UUID) (*domain.WorkspaceStatus, error) {
 	return nil, nil
 }
 
-func (r *testTeamStatusRepo) GetByTeamAndSlug(_ context.Context, _ uuid.UUID, _ string) (*domain.TeamStatus, error) {
+func (r *testStatusRepo) GetByIDs(_ context.Context, _ []uuid.UUID) ([]domain.WorkspaceStatus, error) {
 	return nil, nil
 }
 
-func (r *testTeamStatusRepo) ListByTeam(_ context.Context, _ uuid.UUID) ([]domain.TeamStatus, error) {
+func (r *testStatusRepo) GetByWorkspaceAndSlug(_ context.Context, _ uuid.UUID, _ string) (*domain.WorkspaceStatus, error) {
 	return nil, nil
 }
 
-func (r *testTeamStatusRepo) Update(_ context.Context, _ *domain.TeamStatus) error {
+func (r *testStatusRepo) ListByWorkspace(_ context.Context, _ uuid.UUID) ([]domain.WorkspaceStatus, error) {
+	return nil, nil
+}
+
+func (r *testStatusRepo) Update(_ context.Context, _ *domain.WorkspaceStatus) error {
 	return nil
 }
 
-func (r *testTeamStatusRepo) Delete(_ context.Context, _ uuid.UUID) error {
+func (r *testStatusRepo) Delete(_ context.Context, _ uuid.UUID) error {
 	return nil
 }
 
-func (r *testTeamStatusRepo) GetByIDs(_ context.Context, _ []uuid.UUID) ([]domain.TeamStatus, error) {
-	return nil, nil
-}
-
-func (r *testTeamStatusRepo) NextPosition(_ context.Context, _ uuid.UUID) (int, error) {
+func (r *testStatusRepo) NextPosition(_ context.Context, _ uuid.UUID) (int, error) {
 	return 0, nil
 }
 
@@ -294,6 +238,44 @@ func (r *testCommentRepo) GetByID(_ context.Context, id uuid.UUID) (*domain.Comm
 		}
 	}
 	return nil, nil
+}
+
+func (r *testCommentRepo) GetByGiteaCommentID(_ context.Context, giteaCommentID int64) (*domain.Comment, error) {
+	for _, c := range r.comments {
+		if c.GiteaCommentID != nil && *c.GiteaCommentID == giteaCommentID {
+			return &c, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *testCommentRepo) Update(_ context.Context, id uuid.UUID, body string) error {
+	for i, c := range r.comments {
+		if c.ID == id {
+			r.comments[i].Body = body
+		}
+	}
+	return nil
+}
+
+func (r *testCommentRepo) Delete(_ context.Context, id uuid.UUID) error {
+	remaining := make([]domain.Comment, 0, len(r.comments))
+	for _, c := range r.comments {
+		if c.ID != id && (c.ParentID == nil || *c.ParentID != id) {
+			remaining = append(remaining, c)
+		}
+	}
+	r.comments = remaining
+	return nil
+}
+
+func (r *testCommentRepo) SetGiteaCommentID(_ context.Context, id uuid.UUID, giteaCommentID int64) error {
+	for i, c := range r.comments {
+		if c.ID == id {
+			r.comments[i].GiteaCommentID = &giteaCommentID
+		}
+	}
+	return nil
 }
 
 func (r *testCommentRepo) Resolve(_ context.Context, id uuid.UUID) error {
@@ -356,7 +338,6 @@ func setWorkspaceContext(c echo.Context) uuid.UUID {
 func TestIssueHandler_List(t *testing.T) {
 	e := echo.New()
 	issueRepo := newTestIssueRepo()
-	teamRepo := newTestTeamRepo()
 	historyRepo := &testHistoryRepo{}
 	hub := realtime.NewHub()
 
@@ -371,9 +352,9 @@ func TestIssueHandler_List(t *testing.T) {
 	}
 
 	notifSvc := service.NewNotificationService(&testNotifRepo{})
-	issueSvc := service.NewIssueService(issueRepo, teamRepo, &testTeamStatusRepo{}, historyRepo, hub, notifSvc)
-	commentSvc := service.NewCommentService(&testCommentRepo{}, issueRepo, hub, notifSvc)
-	h := NewIssueHandler(issueSvc, commentSvc, &testUserRepo{}, &testTeamStatusRepo{}, nil, nil, nil)
+	issueSvc := service.NewIssueService(issueRepo, &testStatusRepo{}, historyRepo, hub, notifSvc, nil, nil)
+	commentSvc := service.NewCommentService(&testCommentRepo{}, issueRepo, &testUserRepo{}, hub, notifSvc)
+	h := NewIssueHandler(issueSvc, commentSvc, &testUserRepo{}, &testStatusRepo{}, nil, nil)
 
 	c, rec := setupIssueContext(e, http.MethodGet, "/api/workspaces/test/issues", "")
 	ws := &domain.Workspace{ID: wsID, Name: "Test", Slug: "test"}
@@ -389,26 +370,23 @@ func TestIssueHandler_List(t *testing.T) {
 func TestIssueHandler_Get_Found(t *testing.T) {
 	e := echo.New()
 	issueRepo := newTestIssueRepo()
-	teamRepo := newTestTeamRepo()
 	historyRepo := &testHistoryRepo{}
 	hub := realtime.NewHub()
 
 	wsID := uuid.New()
-	teamID := uuid.New()
 	issueRepo.issues["ENG-1"] = &domain.Issue{
 		ID:          uuid.New(),
 		WorkspaceID: wsID,
 		Identifier:  "ENG-1",
 		Title:       "Test Issue",
 		Status:      domain.IssueStatusTodo,
-		TeamID:      &teamID,
 		CreatorID:   uuid.New(),
 	}
 
 	notifSvc := service.NewNotificationService(&testNotifRepo{})
-	issueSvc := service.NewIssueService(issueRepo, teamRepo, &testTeamStatusRepo{}, historyRepo, hub, notifSvc)
-	commentSvc := service.NewCommentService(&testCommentRepo{}, issueRepo, hub, notifSvc)
-	h := NewIssueHandler(issueSvc, commentSvc, &testUserRepo{}, &testTeamStatusRepo{}, nil, nil, nil)
+	issueSvc := service.NewIssueService(issueRepo, &testStatusRepo{}, historyRepo, hub, notifSvc, nil, nil)
+	commentSvc := service.NewCommentService(&testCommentRepo{}, issueRepo, &testUserRepo{}, hub, notifSvc)
+	h := NewIssueHandler(issueSvc, commentSvc, &testUserRepo{}, &testStatusRepo{}, nil, nil)
 
 	c, rec := setupIssueContext(e, http.MethodGet, "/api/workspaces/test/issues/ENG-1", "")
 	ws := &domain.Workspace{ID: wsID, Name: "Test", Slug: "test"}
@@ -426,14 +404,13 @@ func TestIssueHandler_Get_Found(t *testing.T) {
 func TestIssueHandler_Get_NotFound(t *testing.T) {
 	e := echo.New()
 	issueRepo := newTestIssueRepo()
-	teamRepo := newTestTeamRepo()
 	historyRepo := &testHistoryRepo{}
 	hub := realtime.NewHub()
 
 	notifSvc := service.NewNotificationService(&testNotifRepo{})
-	issueSvc := service.NewIssueService(issueRepo, teamRepo, &testTeamStatusRepo{}, historyRepo, hub, notifSvc)
-	commentSvc := service.NewCommentService(&testCommentRepo{}, issueRepo, hub, notifSvc)
-	h := NewIssueHandler(issueSvc, commentSvc, &testUserRepo{}, &testTeamStatusRepo{}, nil, nil, nil)
+	issueSvc := service.NewIssueService(issueRepo, &testStatusRepo{}, historyRepo, hub, notifSvc, nil, nil)
+	commentSvc := service.NewCommentService(&testCommentRepo{}, issueRepo, &testUserRepo{}, hub, notifSvc)
+	h := NewIssueHandler(issueSvc, commentSvc, &testUserRepo{}, &testStatusRepo{}, nil, nil)
 
 	c, rec := setupIssueContext(e, http.MethodGet, "/api/workspaces/test/issues/ENG-999", "")
 	ws := &domain.Workspace{ID: uuid.New(), Name: "Test", Slug: "test"}
@@ -450,14 +427,13 @@ func TestIssueHandler_Get_NotFound(t *testing.T) {
 func TestIssueHandler_Create_ValidationError(t *testing.T) {
 	e := echo.New()
 	issueRepo := newTestIssueRepo()
-	teamRepo := newTestTeamRepo()
 	historyRepo := &testHistoryRepo{}
 	hub := realtime.NewHub()
 
 	notifSvc := service.NewNotificationService(&testNotifRepo{})
-	issueSvc := service.NewIssueService(issueRepo, teamRepo, &testTeamStatusRepo{}, historyRepo, hub, notifSvc)
-	commentSvc := service.NewCommentService(&testCommentRepo{}, issueRepo, hub, notifSvc)
-	h := NewIssueHandler(issueSvc, commentSvc, &testUserRepo{}, &testTeamStatusRepo{}, nil, nil, nil)
+	issueSvc := service.NewIssueService(issueRepo, &testStatusRepo{}, historyRepo, hub, notifSvc, nil, nil)
+	commentSvc := service.NewCommentService(&testCommentRepo{}, issueRepo, &testUserRepo{}, hub, notifSvc)
+	h := NewIssueHandler(issueSvc, commentSvc, &testUserRepo{}, &testStatusRepo{}, nil, nil)
 
 	// Missing required fields
 	c, rec := setupIssueContext(e, http.MethodPost, "/api/workspaces/test/issues", `{"title": ""}`)
@@ -472,7 +448,6 @@ func TestIssueHandler_Create_ValidationError(t *testing.T) {
 func TestIssueHandler_Delete_Success(t *testing.T) {
 	e := echo.New()
 	issueRepo := newTestIssueRepo()
-	teamRepo := newTestTeamRepo()
 	historyRepo := &testHistoryRepo{}
 	hub := realtime.NewHub()
 
@@ -485,9 +460,9 @@ func TestIssueHandler_Delete_Success(t *testing.T) {
 	}
 
 	notifSvc := service.NewNotificationService(&testNotifRepo{})
-	issueSvc := service.NewIssueService(issueRepo, teamRepo, &testTeamStatusRepo{}, historyRepo, hub, notifSvc)
-	commentSvc := service.NewCommentService(&testCommentRepo{}, issueRepo, hub, notifSvc)
-	h := NewIssueHandler(issueSvc, commentSvc, &testUserRepo{}, &testTeamStatusRepo{}, nil, nil, nil)
+	issueSvc := service.NewIssueService(issueRepo, &testStatusRepo{}, historyRepo, hub, notifSvc, nil, nil)
+	commentSvc := service.NewCommentService(&testCommentRepo{}, issueRepo, &testUserRepo{}, hub, notifSvc)
+	h := NewIssueHandler(issueSvc, commentSvc, &testUserRepo{}, &testStatusRepo{}, nil, nil)
 
 	c, rec := setupIssueContext(e, http.MethodDelete, "/api/workspaces/test/issues/ENG-1", "")
 	ws := &domain.Workspace{ID: wsID, Name: "Test", Slug: "test"}
@@ -505,14 +480,13 @@ func TestIssueHandler_Delete_Success(t *testing.T) {
 func TestIssueHandler_CreateComment_ValidationError(t *testing.T) {
 	e := echo.New()
 	issueRepo := newTestIssueRepo()
-	teamRepo := newTestTeamRepo()
 	historyRepo := &testHistoryRepo{}
 	hub := realtime.NewHub()
 
 	notifSvc := service.NewNotificationService(&testNotifRepo{})
-	issueSvc := service.NewIssueService(issueRepo, teamRepo, &testTeamStatusRepo{}, historyRepo, hub, notifSvc)
-	commentSvc := service.NewCommentService(&testCommentRepo{}, issueRepo, hub, notifSvc)
-	h := NewIssueHandler(issueSvc, commentSvc, &testUserRepo{}, &testTeamStatusRepo{}, nil, nil, nil)
+	issueSvc := service.NewIssueService(issueRepo, &testStatusRepo{}, historyRepo, hub, notifSvc, nil, nil)
+	commentSvc := service.NewCommentService(&testCommentRepo{}, issueRepo, &testUserRepo{}, hub, notifSvc)
+	h := NewIssueHandler(issueSvc, commentSvc, &testUserRepo{}, &testStatusRepo{}, nil, nil)
 
 	c, rec := setupIssueContext(e, http.MethodPost, "/api/workspaces/test/issues/ENG-1/comments", `{"body": ""}`)
 	setWorkspaceContext(c)
@@ -523,4 +497,54 @@ func TestIssueHandler_CreateComment_ValidationError(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
+// fakeGiteaCommentSync fakes the Gitea integration for comment tests.
+type fakeGiteaCommentSync struct {
+	connected bool
+}
+
+func (f *fakeGiteaCommentSync) HasGiteaInstance(context.Context, uuid.UUID) (bool, error) {
+	return f.connected, nil
+}
+
+func (f *fakeGiteaCommentSync) SyncCommentToGitea(context.Context, *domain.Issue, *domain.Comment) error {
+	return nil
+}
+
+func TestIssueHandler_CreateComment_GiteaLoginRequired(t *testing.T) {
+	e := echo.New()
+	issueRepo := newTestIssueRepo()
+	historyRepo := &testHistoryRepo{}
+	hub := realtime.NewHub()
+
+	wsID := uuid.New()
+	issueRepo.issues["ENG-1"] = &domain.Issue{
+		ID:          uuid.New(),
+		WorkspaceID: wsID,
+		Identifier:  "ENG-1",
+		Title:       "Test Issue",
+		Status:      domain.IssueStatusTodo,
+		CreatorID:   uuid.New(),
+	}
+
+	notifSvc := service.NewNotificationService(&testNotifRepo{})
+	issueSvc := service.NewIssueService(issueRepo, &testStatusRepo{}, historyRepo, hub, notifSvc, nil, nil)
+	userID := uuid.New()
+	commentSvc := service.NewCommentService(&testCommentRepo{}, issueRepo, &testUserRepo{specificUserID: userID}, hub, notifSvc)
+	commentSvc.SetGiteaService(&fakeGiteaCommentSync{connected: true})
+	h := NewIssueHandler(issueSvc, commentSvc, &testUserRepo{}, &testStatusRepo{}, nil, nil)
+
+	c, rec := setupIssueContext(e, http.MethodPost, "/api/workspaces/test/issues/ENG-1/comments", `{"body": "hello"}`)
+	ws := &domain.Workspace{ID: wsID, Name: "Test", Slug: "test"}
+	c.Set("workspace", ws)
+	c.Set("user_id", userID)
+	c.SetParamNames("identifier")
+	c.SetParamValues("ENG-1")
+
+	err := h.CreateComment(c)
+
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusConflict, rec.Code)
+	assert.Contains(t, rec.Body.String(), "GITEA_LOGIN_REQUIRED")
 }

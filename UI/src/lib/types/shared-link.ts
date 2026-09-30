@@ -6,7 +6,7 @@ export interface SharedLink {
 	token: string;
 	workspace_id: string;
 	created_by: string;
-	scope: 'workspace' | 'team' | 'project' | 'view';
+	scope: 'workspace' | 'project' | 'view';
 	scope_id?: string;
 	filters: Record<string, string>;
 	include_description: boolean;
@@ -18,7 +18,7 @@ export interface SharedLink {
 }
 
 export interface CreateSharedLinkRequest {
-	scope: 'workspace' | 'team' | 'project' | 'view';
+	scope: 'workspace' | 'project' | 'view';
 	scope_id?: string;
 	filters?: Record<string, string>;
 	include_description?: boolean;

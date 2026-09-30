@@ -39,7 +39,7 @@ func performCreateWorkspaceRequest(t *testing.T, repo repository.WorkspaceRepo) 
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.Set("user_id", uuid.New())
-	h := NewWorkspaceHandler(service.NewWorkspaceService(repo, nil))
+	h := NewWorkspaceHandler(service.NewWorkspaceService(repo, nil, nil))
 
 	require.NoError(t, h.Create(c))
 	return rec

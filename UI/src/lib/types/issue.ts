@@ -24,9 +24,8 @@ export interface Issue {
 	status_id?: string;
 	status_info?: StatusInfo;
 	priority: IssuePriority;
-	team_id: string | null;
 	project_id: string | null;
-	cycle_id: string | null;
+	cycle_id?: string | null;
 	creator_id: string;
 	assignee_id: string | null;
 	parent_id: string | null;
@@ -80,14 +79,12 @@ export interface CreateIssueRequest {
 	status?: IssueStatus;
 	status_id?: string;
 	priority?: IssuePriority;
-	team_id?: string | null;
-	project_id?: string;
+	project_id: string;
 	assignee_id?: string;
 	assignee_ids?: string[];
 	label_ids?: string[];
 	parent_id?: string;
 	due_date?: string;
-	cycle_id?: string;
 }
 
 export interface UpdateIssueRequest {
@@ -99,12 +96,10 @@ export interface UpdateIssueRequest {
 	assignee_id?: string;
 	assignee_ids?: string[];
 	project_id?: string;
-	cycle_id?: string;
 	label_ids?: string[];
 	parent_id?: string;
 	due_date?: string;
 	sort_order?: number;
-	team_id?: string | null;
 }
 
 export interface IssueHistory {
@@ -133,7 +128,6 @@ export interface IssueRelation {
 export interface IssueTemplate {
 	id: string;
 	workspace_id: string;
-	team_id: string | null;
 	title: string;
 	description: string | null;
 	status: IssueStatus | null;
@@ -155,17 +149,19 @@ export interface CreateIssueTemplateRequest {
 	priority?: IssuePriority;
 	label_ids?: string[];
 	assignee_id?: string;
-	team_id?: string;
 }
 
 export interface Comment {
 	id: string;
 	issue_id: string;
-	user_id: string;
+	user_id?: string | null;
 	body: string;
 	parent_id?: string;
 	resolved_at?: string;
-	user?: User;
+	user?: User | null;
+	author_login?: string | null;
+	author_avatar_url?: string | null;
+	gitea_comment_id?: number | null;
 	replies?: Comment[];
 	created_at: string;
 	updated_at: string;

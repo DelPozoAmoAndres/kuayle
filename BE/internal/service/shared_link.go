@@ -21,35 +21,32 @@ var protectedPublicAssetPattern = regexp.MustCompile(`(?i)(\b(?:src|href)=["'])(
 type SharedLinkService struct {
 	sharedLinkRepo   repository.SharedLinkRepo
 	workspaceRepo    repository.WorkspaceRepo
-	teamRepo         repository.TeamRepo
 	projectRepo      repository.ProjectRepo
 	viewRepo         repository.ViewRepo
 	issueRepo        repository.IssueRepo
 	userRepo         repository.UserRepo
-	teamStatusRepo   repository.TeamStatusRepo
+	statusRepo       repository.StatusRepo
 	assetTokenSecret string
 }
 
 func NewSharedLinkService(
 	sharedLinkRepo repository.SharedLinkRepo,
 	workspaceRepo repository.WorkspaceRepo,
-	teamRepo repository.TeamRepo,
 	projectRepo repository.ProjectRepo,
 	viewRepo repository.ViewRepo,
 	issueRepo repository.IssueRepo,
 	userRepo repository.UserRepo,
-	teamStatusRepo repository.TeamStatusRepo,
+	statusRepo repository.StatusRepo,
 	jwtSecret string,
 ) *SharedLinkService {
 	return &SharedLinkService{
 		sharedLinkRepo:   sharedLinkRepo,
 		workspaceRepo:    workspaceRepo,
-		teamRepo:         teamRepo,
 		projectRepo:      projectRepo,
 		viewRepo:         viewRepo,
 		issueRepo:        issueRepo,
 		userRepo:         userRepo,
-		teamStatusRepo:   teamStatusRepo,
+		statusRepo:       statusRepo,
 		assetTokenSecret: jwtSecret + ":prompt-assets",
 	}
 }
@@ -87,14 +84,6 @@ func (s *SharedLinkService) Create(ctx context.Context, workspaceID, userID uuid
 	switch domain.SharedLinkScope(req.Scope) {
 	case domain.SharedLinkScopeWorkspace:
 		// No scope_id needed
-	case domain.SharedLinkScopeTeam:
-		if scopeID == nil {
-			return nil, fmt.Errorf("scope_id is required for team scope")
-		}
-		team, err := s.teamRepo.GetByID(ctx, *scopeID)
-		if err != nil || team == nil {
-			return nil, fmt.Errorf("team not found")
-		}
 	case domain.SharedLinkScopeProject:
 		if scopeID == nil {
 			return nil, fmt.Errorf("scope_id is required for project scope")
@@ -213,17 +202,10 @@ func (s *SharedLinkService) GetPublicMeta(ctx context.Context, token string) (*d
 	}
 
 	scopeName := ws.Name
-	var statuses []dto.PublicStatusResponse
+	// Statuses are workspace-scoped, so every share exposes the same set.
+	statuses := s.loadWorkspaceStatuses(ctx, ws.ID)
 
 	switch link.Scope {
-	case domain.SharedLinkScopeTeam:
-		if link.ScopeID != nil {
-			team, err := s.teamRepo.GetByID(ctx, *link.ScopeID)
-			if err == nil && team != nil {
-				scopeName = team.Name
-				statuses = s.loadTeamStatuses(ctx, team.ID)
-			}
-		}
 	case domain.SharedLinkScopeProject:
 		if link.ScopeID != nil {
 			project, err := s.projectRepo.GetByID(ctx, *link.ScopeID)
@@ -287,13 +269,13 @@ func (s *SharedLinkService) ListPublicIssues(ctx context.Context, token string, 
 			statusIDSet[*issue.StatusID] = struct{}{}
 		}
 	}
-	statusMap := make(map[uuid.UUID]*domain.TeamStatus)
+	statusMap := make(map[uuid.UUID]*domain.WorkspaceStatus)
 	if len(statusIDSet) > 0 {
 		statusIDs := make([]uuid.UUID, 0, len(statusIDSet))
 		for id := range statusIDSet {
 			statusIDs = append(statusIDs, id)
 		}
-		statuses, _ := s.teamStatusRepo.GetByIDs(ctx, statusIDs)
+		statuses, _ := s.statusRepo.GetByIDs(ctx, statusIDs)
 		for i := range statuses {
 			statusMap[statuses[i].ID] = &statuses[i]
 		}
@@ -418,10 +400,6 @@ func (s *SharedLinkService) buildPublicFilterParams(link *domain.SharedLink, que
 
 	// 1. Set scope-based filters (immutable from link)
 	switch link.Scope {
-	case domain.SharedLinkScopeTeam:
-		if link.ScopeID != nil {
-			params.TeamID = link.ScopeID.String()
-		}
 	case domain.SharedLinkScopeProject:
 		if link.ScopeID != nil {
 			params.ProjectID = link.ScopeID.String()
@@ -492,22 +470,16 @@ func applyStoredFilters(params *dto.IssueFilterParams, filters map[string]string
 	if v, ok := filters["assignee"]; ok && params.AssigneeID == "" {
 		params.AssigneeID = v
 	}
-	if v, ok := filters["team"]; ok && params.TeamID == "" {
-		params.TeamID = v
-	}
 	if v, ok := filters["project"]; ok && params.ProjectID == "" {
 		params.ProjectID = v
 	}
 	if v, ok := filters["label"]; ok && params.LabelID == "" {
 		params.LabelID = v
 	}
-	if v, ok := filters["cycle"]; ok && params.CycleID == "" {
-		params.CycleID = v
-	}
 }
 
-func (s *SharedLinkService) loadTeamStatuses(ctx context.Context, teamID uuid.UUID) []dto.PublicStatusResponse {
-	statuses, err := s.teamStatusRepo.ListByTeam(ctx, teamID)
+func (s *SharedLinkService) loadWorkspaceStatuses(ctx context.Context, workspaceID uuid.UUID) []dto.PublicStatusResponse {
+	statuses, err := s.statusRepo.ListByWorkspace(ctx, workspaceID)
 	if err != nil {
 		return nil
 	}

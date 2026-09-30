@@ -41,17 +41,13 @@ export type AnalyticsSlice =
 	| 'status'
 	| 'priority'
 	| 'assignee'
-	| 'team'
 	| 'project'
-	| 'cycle'
 	| 'label'
 	| 'creator';
 export type AnalyticsSegment = AnalyticsSlice;
 
 export interface AnalyticsFilterParams {
-	team_id?: string;
 	project_id?: string;
-	cycle_id?: string;
 	assignee_id?: string;
 	creator_id?: string;
 	status_id?: string;
@@ -62,9 +58,7 @@ export interface AnalyticsFilterParams {
 	include_triage?: boolean;
 }
 
-export interface AnalyticsScopeParams {
-	team_id?: string;
-}
+export type AnalyticsScopeParams = Record<string, never>;
 
 export interface InsightsParams extends AnalyticsFilterParams {
 	measure: AnalyticsMeasure;
@@ -146,7 +140,7 @@ export function defaultDateRange(dayCount = 90): { from: string; to: string } {
 	return { from: dateString(from), to };
 }
 
-const NONE_FILTER_KEYS = new Set(['project_id', 'cycle_id', 'assignee_id']);
+const NONE_FILTER_KEYS = new Set(['project_id', 'assignee_id']);
 
 function buildQuery(params: AnalyticsScopeParams | InsightsParams | BurnupParams): string {
 	const query = new URLSearchParams();

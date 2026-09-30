@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -28,10 +27,18 @@ func TestDevMachineMigrationsAreConsolidated(t *testing.T) {
 	down, err := os.ReadFile("000033_dev_machines.down.sql")
 	require.NoError(t, err)
 
-	for version := 34; version <= 36; version++ {
-		matches, globErr := filepath.Glob(fmt.Sprintf("%06d_*.sql", version))
-		require.NoError(t, globErr)
-		require.Empty(t, matches)
+	// Dev-machine DDL must stay consolidated in 000033. Later migrations may
+	// exist for other features, but none of them may touch dev machine objects.
+	allMigrations, globErr := filepath.Glob("*.sql")
+	require.NoError(t, globErr)
+	for _, name := range allMigrations {
+		if strings.HasPrefix(name, "000033_dev_machines.") {
+			continue
+		}
+		contents, readErr := os.ReadFile(name)
+		require.NoError(t, readErr)
+		require.NotContains(t, string(contents), "dev_machine",
+			"%s must not add dev machine DDL (keep it consolidated in 000033)", name)
 	}
 
 	upSQL := string(up)

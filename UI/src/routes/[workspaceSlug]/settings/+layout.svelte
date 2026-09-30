@@ -1,7 +1,5 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { onMount } from 'svelte';
-	import { cubicOut } from 'svelte/easing';
 	import {
 		ArrowLeft,
 		User,
@@ -15,16 +13,12 @@
 		Sparkles,
 		SlidersHorizontal,
 		CircleDot,
-		ChevronDown,
 		Menu,
 		RefreshCw,
 		GitBranch
 	} from 'lucide-svelte';
 	import { GithubLogoIcon } from 'phosphor-svelte';
 	import type { Snippet } from 'svelte';
-	import type { Team } from '$lib/types/team';
-	import { listTeams } from '$lib/api/teams';
-	import TeamIcon from '$lib/components/shared/TeamIcon.svelte';
 	import * as Sheet from '$lib/components/ui/sheet';
 	import { Button } from '$lib/components/ui/button';
 	import { authState } from '$lib/features/auth/auth.state.svelte';
@@ -32,51 +26,13 @@
 	import { m } from '$lib/paraglide/messages.js';
 	import { getLocale, setLocale } from '$lib/paraglide/runtime.js';
 
-	function slideFade(node: HTMLElement, params: { duration?: number } = {}) {
-		const duration = params.duration ?? 200;
-		const h = node.offsetHeight;
-		return {
-			duration,
-			easing: cubicOut,
-			css: (t: number) => `overflow: hidden; height: ${t * h}px; opacity: ${t};`
-		};
-	}
-
 	let { children }: { children: Snippet } = $props();
 
 	const slug = $derived(page.params.workspaceSlug ?? '');
 	const currentPath = $derived(page.url.pathname);
 	const canUseDevMachines = $derived(!demoMode || authState.user?.is_sysadmin === true);
 
-	let teams = $state<Team[]>([]);
-	let expandedTeams = $state<Set<string>>(new Set());
 	let showMobileNav = $state(false);
-
-	async function loadTeams() {
-		teams = await listTeams(slug);
-		for (const team of teams) {
-			if (currentPath.includes(`/settings/teams/${team.id}`)) {
-				expandedTeams.add(team.id);
-				expandedTeams = new Set(expandedTeams);
-			}
-		}
-	}
-
-	onMount(() => {
-		loadTeams();
-
-		function handleAppRefresh(e: Event) {
-			const detail = (e as CustomEvent<{ slug?: string; resources?: string[] }>).detail;
-			if (detail?.slug && detail.slug !== slug) return;
-			const resources = detail?.resources;
-			if (!resources || resources.includes('teams')) {
-				loadTeams();
-			}
-		}
-
-		window.addEventListener('app:refresh', handleAppRefresh);
-		return () => window.removeEventListener('app:refresh', handleAppRefresh);
-	});
 
 	function isActive(path: string): boolean {
 		return currentPath === path || currentPath.startsWith(path + '/');
@@ -96,6 +52,7 @@
 				{ label: m['settings.nav.general'](), href: `/${slug}/settings`, icon: Settings, exact: true },
 				{ label: m['settings.nav.members'](), href: `/${slug}/settings/members`, icon: Users },
 				{ label: m['settings.nav.labels'](), href: `/${slug}/settings/labels`, icon: Tag },
+				{ label: m['settings.nav.statuses'](), href: `/${slug}/settings/statuses`, icon: CircleDot },
 				{ label: m['settings.nav.webhooks'](), href: `/${slug}/settings/webhooks`, icon: Webhook },
 				{ label: m['settings.nav.github'](), href: `/${slug}/settings/github`, icon: GithubLogoIcon },
 				{ label: 'Gitea', href: `/${slug}/settings/gitea`, icon: GitBranch },
@@ -113,14 +70,6 @@
 		}
 	]);
 
-	function toggleTeam(teamId: string) {
-		if (expandedTeams.has(teamId)) {
-			expandedTeams.delete(teamId);
-		} else {
-			expandedTeams.add(teamId);
-		}
-		expandedTeams = new Set(expandedTeams);
-	}
 </script>
 
 {#snippet settingsNav()}
@@ -162,52 +111,6 @@
 			{/each}
 		</div>
 
-		<!-- Teams section -->
-		{#if teams.length > 0}
-			<div class="mt-4">
-				{#each teams as team}
-					{@const expanded = expandedTeams.has(team.id)}
-					<button
-						type="button"
-						class="flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1 text-left text-sm text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]"
-						onclick={() => toggleTeam(team.id)}
-					>
-						<ChevronDown
-							size={12}
-							class="shrink-0 text-[var(--color-text-tertiary)] transition-transform {expanded ? '' : '-rotate-90'}"
-						/>
-						<TeamIcon {team} />
-						<span class="truncate">{team.name}</span>
-					</button>
-					{#if expanded}
-						<div transition:slideFade>
-							<a
-								href="/{slug}/settings/teams/{team.id}"
-								class="ml-7 flex items-center gap-2 rounded-md px-2 py-1 text-xs {isActive(
-									`/${slug}/settings/teams/${team.id}`
-								) && !isActive(`/${slug}/settings/teams/${team.id}/statuses`)
-									? 'bg-[var(--color-bg-hover)]/50 text-[var(--color-text-primary)]'
-									: 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]'}"
-							>
-								<SlidersHorizontal size={13} />
-									{m['settings.nav.general']()}
-							</a>
-							<a
-								href="/{slug}/settings/teams/{team.id}/statuses"
-								class="ml-7 flex items-center gap-2 rounded-md px-2 py-1 text-xs {isActive(
-									`/${slug}/settings/teams/${team.id}/statuses`
-								)
-									? 'bg-[var(--color-bg-hover)]/50 text-[var(--color-text-primary)]'
-									: 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]'}"
-							>
-								<CircleDot size={13} />
-									{m['settings.nav.issue_statuses']()}
-							</a>
-						</div>
-					{/if}
-				{/each}
-			</div>
-		{/if}
 	</nav>
 {/snippet}
 

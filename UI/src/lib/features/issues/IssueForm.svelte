@@ -1,34 +1,36 @@
 <script lang="ts">
 	import type { CreateIssueRequest, IssuePriority } from '$lib/types/issue';
-	import type { Team } from '$lib/types/team';
+	import type { Project } from '$lib/types/project';
 	import { getPriorityLabels } from '$lib/types/issue';
-	import { teamStatusesState } from './team-statuses.state.svelte';
+	import { statusesState } from './statuses.state.svelte';
+	import { m } from '$lib/paraglide/messages.js';
 
 	let {
-		teams,
+		projects = [],
 		onsubmit,
 		oncancel
 	}: {
-		teams: Team[];
+		projects?: Project[];
 		onsubmit: (req: CreateIssueRequest) => void;
 		oncancel: () => void;
 	} = $props();
 
 	let title = $state('');
 	let description = $state('');
-	let statusId = $state(teamStatusesState.defaultForCategory('backlog')?.id ?? '');
+	let statusId = $state(statusesState.defaultForCategory('backlog')?.id ?? '');
 	let priority = $state<IssuePriority>(0);
 	// svelte-ignore state_referenced_locally
-	let teamId = $state(teams[0]?.id ?? '');
+	let projectId = $state<string | null>(projects[0]?.id ?? null);
 
 	function handleSubmit(e: Event) {
 		e.preventDefault();
+		if (!projectId) return;
 		onsubmit({
 			title,
 			description: description || undefined,
 			status_id: statusId || undefined,
 			priority,
-			team_id: teamId || undefined
+			project_id: projectId
 		});
 	}
 </script>
@@ -54,21 +56,25 @@
 	</div>
 
 	<div class="flex flex-wrap gap-3">
-		<select
-			bind:value={teamId}
-			class="rounded border border-[var(--app-border)] bg-[var(--color-bg-secondary)] px-2 py-1.5 text-sm text-[var(--color-text-secondary)]"
-		>
-			<option value="">Sin equipo</option>
-			{#each teams as team}
-				<option value={team.id}>{team.name}</option>
-			{/each}
-		</select>
+		{#if projects.length === 0}
+			<p class="text-xs text-[var(--color-text-tertiary)]">{m['issue.create_project_first']()}</p>
+		{:else}
+			<select
+				bind:value={projectId}
+				required
+				class="rounded border border-[var(--app-border)] bg-[var(--color-bg-secondary)] px-2 py-1.5 text-sm text-[var(--color-text-secondary)]"
+			>
+				{#each projects as project}
+					<option value={project.id}>{project.name}</option>
+				{/each}
+			</select>
+		{/if}
 
 		<select
 			bind:value={statusId}
 			class="rounded border border-[var(--app-border)] bg-[var(--color-bg-secondary)] px-2 py-1.5 text-sm text-[var(--color-text-secondary)]"
 		>
-			{#each teamStatusesState.statusOrder as ts}
+			{#each statusesState.statusesForProject(projectId) as ts}
 				<option value={ts.id}>{ts.name}</option>
 			{/each}
 		</select>
@@ -93,7 +99,7 @@
 		</button>
 		<button
 			type="submit"
-			disabled={!title.trim()}
+			disabled={!title.trim() || !projectId}
 			class="rounded-md bg-[var(--app-accent)] px-3 py-1.5 text-sm text-[var(--app-accent-foreground)] hover:bg-[var(--app-accent-hover)] disabled:opacity-50"
 		>
 			Create issue

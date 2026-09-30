@@ -43,12 +43,6 @@ func (r *ProjectRepository) Update(ctx context.Context, project *domain.Project)
 	return r.db.QueryRowContext(ctx, query, project.Name, project.Description, project.Status, project.LeadID, project.StartDate, project.TargetDate, project.SortOrder, project.TeamID, project.ID).Scan(&project.UpdatedAt)
 }
 
-func (r *ProjectRepository) ListByTeam(ctx context.Context, teamID uuid.UUID) ([]domain.Project, error) {
-	var projects []domain.Project
-	err := r.db.SelectContext(ctx, &projects, `SELECT * FROM projects WHERE team_id = $1 ORDER BY sort_order, name`, teamID)
-	return projects, err
-}
-
 func (r *ProjectRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM projects WHERE id = $1`, id)
 	return err

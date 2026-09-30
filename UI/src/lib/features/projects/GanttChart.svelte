@@ -1,7 +1,6 @@
 <script lang="ts">
 	import type { Issue, IssueStatus } from '$lib/types/issue';
 	import { getStatusLabel } from '$lib/types/issue';
-	import type { Cycle } from '$lib/types/cycle';
 	import * as echarts from 'echarts';
 	import { Filter, X } from 'lucide-svelte';
 	import { m } from '$lib/paraglide/messages.js';
@@ -9,11 +8,9 @@
 
 	let {
 		issues,
-		cycles = [],
 		onissueclick
 	}: {
 		issues: Issue[];
-		cycles?: Cycle[];
 		onissueclick?: (issue: Issue) => void;
 	} = $props();
 
@@ -100,17 +97,6 @@
 			}
 		}
 
-		for (const cycle of cycles) {
-			if (cycle.start_date) {
-				const d = new Date(cycle.start_date);
-				if (d < min) min = d;
-			}
-			if (cycle.end_date) {
-				const d = new Date(cycle.end_date);
-				if (d > max) max = d;
-			}
-		}
-
 		const padded_min = new Date(min);
 		padded_min.setDate(padded_min.getDate() - 5);
 		const padded_max = new Date(max);
@@ -166,46 +152,6 @@
 			};
 		});
 
-		const cycleColors = ['#6366f1', '#8b5cf6', '#a855f7'];
-		// Group overlapping cycles by date range so we merge their labels
-		const cycleGroups = new Map<string, { names: string[]; start: number; end: number }>();
-		for (const cycle of cycles) {
-			if (cycle.start_date && cycle.end_date) {
-				const start = new Date(cycle.start_date).getTime();
-				const end = new Date(cycle.end_date).getTime();
-				const key = `${start}-${end}`;
-				const existing = cycleGroups.get(key);
-				if (existing) {
-					existing.names.push(cycle.name);
-				} else {
-					cycleGroups.set(key, { names: [cycle.name], start, end });
-				}
-			}
-		}
-		const cycleAreas: any[] = [];
-		let cycleIdx = 0;
-		for (const group of cycleGroups.values()) {
-			const cColor = cycleColors[cycleIdx % cycleColors.length];
-			const label = group.names.join(' / ');
-			cycleAreas.push([
-				{
-					xAxis: group.start,
-					itemStyle: { color: cColor + '18', borderWidth: 1, borderType: 'dashed', borderColor: cColor + '35' },
-					label: {
-						show: true,
-						position: 'insideTop',
-						formatter: label,
-						fontSize: 10,
-						fontWeight: 500,
-						color: cColor + '99',
-						padding: [4, 8]
-					}
-				},
-				{ xAxis: group.end, label: { show: false } }
-			]);
-			cycleIdx++;
-		}
-
 		const today = new Date();
 		const todayInRange = today >= dateRange.min && today <= dateRange.max;
 
@@ -215,7 +161,7 @@
 			grid: {
 				left: 12,
 				right: 12,
-				top: cycles.length > 0 ? 28 : 16,
+				top: 16,
 				bottom: 44
 			},
 			xAxis: {
@@ -373,7 +319,6 @@
 						x: [1, 2],
 						y: 0
 					},
-					markArea: cycleAreas.length > 0 ? { silent: true, data: cycleAreas } : undefined,
 					markLine: todayInRange ? {
 						silent: true,
 						symbol: 'none',

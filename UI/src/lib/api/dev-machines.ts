@@ -169,17 +169,17 @@ export async function ensureIssueCheckoutReady(
 	return checkout;
 }
 
-export function getDevMachineScopeSetting(slug: string, scopeType: 'workspace' | 'team' | 'project' | 'issue', scopeId?: string): Promise<DevMachineScopeSetting> {
+export function getDevMachineScopeSetting(slug: string, scopeType: 'workspace' | 'project' | 'issue', scopeId?: string): Promise<DevMachineScopeSetting> {
 	const query = new URLSearchParams({ scope_type: scopeType });
 	if (scopeId) query.set('scope_id', scopeId);
 	return api.get(`${base(slug)}/dev-machine-scope-setting?${query}`);
 }
 
-export function updateDevMachineScopeSetting(slug: string, input: { scope_type: 'workspace' | 'team' | 'project' | 'issue'; scope_id?: string; github_repo_id?: string; base_branch?: string; environment_id?: string }): Promise<DevMachineScopeSetting> {
+export function updateDevMachineScopeSetting(slug: string, input: { scope_type: 'workspace' | 'project' | 'issue'; scope_id?: string; github_repo_id?: string; base_branch?: string; environment_id?: string }): Promise<DevMachineScopeSetting> {
 	return api.put(`${base(slug)}/dev-machine-scope-setting`, input);
 }
 
-export function deleteDevMachineScopeSetting(slug: string, scopeType: 'workspace' | 'team' | 'project' | 'issue', scopeId?: string): Promise<void> {
+export function deleteDevMachineScopeSetting(slug: string, scopeType: 'workspace' | 'project' | 'issue', scopeId?: string): Promise<void> {
 	const query = new URLSearchParams({ scope_type: scopeType });
 	if (scopeId) query.set('scope_id', scopeId);
 	return api.delete(`${base(slug)}/dev-machine-scope-setting?${query}`);

@@ -4,13 +4,13 @@ import (
 	"encoding/json"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/kuayle/kuayle-backend/internal/domain"
 	"github.com/kuayle/kuayle-backend/internal/dto"
 	"github.com/kuayle/kuayle-backend/internal/middleware"
 	"github.com/kuayle/kuayle-backend/internal/service"
 	"github.com/kuayle/kuayle-backend/pkg/response"
 	"github.com/kuayle/kuayle-backend/pkg/validate"
-	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	log "github.com/sirupsen/logrus"
 )
@@ -130,10 +130,6 @@ func toIssueTemplateResponse(tmpl *domain.IssueTemplate) dto.IssueTemplateRespon
 		CreatedBy:      tmpl.CreatedBy.String(),
 		CreatedAt:      tmpl.CreatedAt,
 		UpdatedAt:      tmpl.UpdatedAt,
-	}
-	if tmpl.TeamID != nil {
-		s := tmpl.TeamID.String()
-		resp.TeamID = &s
 	}
 	if tmpl.AssigneeID != nil {
 		s := tmpl.AssigneeID.String()

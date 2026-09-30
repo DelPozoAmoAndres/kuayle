@@ -17,7 +17,6 @@ test('keeps dirty local theme when remote preferences are stale', async ({ page 
 				darkTheme: 'cyber-77',
 				workflowSortMode: 'default',
 				workflowSortOrder: order,
-				teamWorkflowSortOverrides: {},
 				localDirty: true
 			})
 		);
@@ -53,7 +52,6 @@ test('keeps dirty local theme when remote preferences are stale', async ({ page 
 					dark_theme: 'dark',
 					workflow_sort_mode: 'default',
 					workflow_sort_order: workflowSortOrder,
-					team_workflow_sort_overrides: {}
 				}
 			});
 		}
@@ -77,7 +75,7 @@ test('keeps dirty local theme when remote preferences are stale', async ({ page 
 		}
 
 		if (
-			path === '/api/workspaces/test/teams' ||
+			path === '/api/workspaces/test/statuses' ||
 			path === '/api/workspaces/test/projects' ||
 			path === '/api/workspaces/test/labels' ||
 			path === '/api/workspaces/test/members' ||

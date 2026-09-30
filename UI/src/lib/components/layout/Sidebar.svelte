@@ -18,10 +18,8 @@
 	import { demoMode } from '$lib/demo';
 	import { ROLE_HIERARCHY } from '$lib/security/roles';
 	import type { Workspace } from '$lib/types/workspace';
-	import type { Team } from '$lib/types/team';
 	import type { View } from '$lib/types/view';
-	import { isPersonalView, isTeamView, isWorkspaceView } from '$lib/types/view';
-	import TeamIcon from '$lib/components/shared/TeamIcon.svelte';
+	import { isPersonalView, isWorkspaceView } from '$lib/types/view';
 	import WorkspaceSwitcher from './WorkspaceSwitcher.svelte';
 	import type { Favorite } from '$lib/api/favorites';
 	import type { Project } from '$lib/types/project';
@@ -30,7 +28,6 @@
 	import { deleteView } from '$lib/api/views';
 	import { currentReleaseUrl, currentVersionLabel } from '$lib/release';
 	import * as Popover from '$lib/components/ui/popover';
-	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import * as ContextMenu from '$lib/components/ui/context-menu';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { dndzone } from 'svelte-dnd-action';
@@ -45,18 +42,13 @@
 		CircleUser,
 		Settings,
 		LogOut,
-		SquareUser,
 		Box,
 		Plus,
 		Layers,
-		RefreshCcwDot,
-		ShieldCheck,
 		Star,
 		ChevronDown,
-		SquaresSubtract,
 		SquarePen,
 		Search,
-		Ellipsis,
 		Trash2,
 		Info,
 		CircleQuestionMark,
@@ -65,7 +57,6 @@
 
 	let {
 		workspace,
-		teams,
 		views = [],
 		favorites = [],
 		projects = [],
@@ -73,15 +64,11 @@
 		slug,
 		mobile = false,
 		oncreateissue,
-		oncreateteam,
-		onleaveteam,
-		ondeleteteam,
 		onsearch,
 		onnavigate,
 		onshortcutshelp
 	}: {
 		workspace: Workspace;
-		teams: Team[];
 		views?: View[];
 		favorites?: Favorite[];
 		projects?: Project[];
@@ -89,9 +76,6 @@
 		slug: string;
 		mobile?: boolean;
 		oncreateissue?: () => void;
-		oncreateteam?: () => void;
-		onleaveteam?: (team: Team) => void;
-		ondeleteteam?: (team: Team) => void;
 		onsearch?: () => void;
 		onnavigate?: () => void;
 		onshortcutshelp?: () => void;
@@ -140,54 +124,25 @@
 		return next;
 	}
 
-	let teamsCollapsed = $state(initCollapsed('teams'));
 	let favoritesCollapsed = $state(initCollapsed('favorites'));
 	let viewsCollapsed = $state(initCollapsed('views'));
-	let projectsCollapsed = $state(initCollapsed('projects'));
+	// "All projects" is expanded by default and its state is NOT persisted:
+	// the legacy `sidebar_projects` key is dropped so migrated users always
+	// see the project list.
+	let projectsCollapsed = $state(false);
 
-	let collapsedTeams = $state<Set<string>>(new Set());
-	let loadedCollapsedTeamsSlug = '';
 	let pendingDeleteView = $state<View | null>(null);
 	let deleteViewOpen = $state(false);
 
-	function collapsedTeamsStorageKey() {
-		return `sidebar_collapsed_teams_${slug}`;
+	if (typeof localStorage !== 'undefined') {
+		localStorage.removeItem('sidebar_projects');
 	}
 
-	function loadCollapsedTeamIds(): string[] {
-		if (typeof localStorage === 'undefined') return [];
-		try {
-			const stored =
-				localStorage.getItem(collapsedTeamsStorageKey()) ?? localStorage.getItem('sidebar_collapsed_teams') ?? '[]';
-			const value = JSON.parse(stored);
-			return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [];
-		} catch {
-			return [];
-		}
-	}
-
-	$effect(() => {
-		if (!slug || loadedCollapsedTeamsSlug === slug) return;
-		loadedCollapsedTeamsSlug = slug;
-		collapsedTeams = new Set(loadCollapsedTeamIds());
-	});
-
-	function toggleTeam(teamId: string) {
-		const next = new Set(collapsedTeams);
-		if (next.has(teamId)) {
-			next.delete(teamId);
-		} else {
-			next.add(teamId);
-		}
-		collapsedTeams = next;
-		localStorage.setItem(collapsedTeamsStorageKey(), JSON.stringify([...next]));
-	}
-
-	function orderStorageKey(kind: 'teams' | 'views' | 'projects') {
+	function orderStorageKey(kind: 'views' | 'projects') {
 		return `sidebar_order_${slug}_${kind}`;
 	}
 
-	function loadOrder(kind: 'teams' | 'views' | 'projects'): string[] {
+	function loadOrder(kind: 'views' | 'projects'): string[] {
 		if (typeof localStorage === 'undefined') return [];
 		try {
 			const value = JSON.parse(localStorage.getItem(orderStorageKey(kind)) || '[]');
@@ -197,12 +152,12 @@
 		}
 	}
 
-	function saveOrder(kind: 'teams' | 'views' | 'projects', ids: string[]) {
+	function saveOrder(kind: 'views' | 'projects', ids: string[]) {
 		if (typeof localStorage === 'undefined') return;
 		localStorage.setItem(orderStorageKey(kind), JSON.stringify(ids));
 	}
 
-	function applyStoredOrder<T extends { id: string }>(items: T[], kind: 'teams' | 'views' | 'projects'): T[] {
+	function applyStoredOrder<T extends { id: string }>(items: T[], kind: 'views' | 'projects'): T[] {
 		const order = loadOrder(kind);
 		if (order.length === 0) return [...items];
 		const index = new Map(order.map((id, i) => [id, i]));
@@ -224,7 +179,6 @@
 		return next;
 	}
 
-	let orderedTeams = $state<Team[]>([]);
 	let orderedViews = $state<View[]>([]);
 	let orderedProjects = $state<Project[]>([]);
 	let personalViews = $derived(orderedViews.filter(isPersonalView));
@@ -282,12 +236,6 @@
 	}
 
 	$effect(() => {
-		const nextTeams = applyStoredOrder(teams, 'teams');
-		orderedTeams = nextTeams;
-		sidebarState.teams = nextTeams;
-	});
-
-	$effect(() => {
 		orderedViews = applyStoredOrder(views, 'views');
 	});
 
@@ -301,41 +249,12 @@
 		sidebarState.projects = nextProjects;
 	});
 
-	function handleTeamsConsider(e: SidebarDndEvent<Team>) {
-		updateActiveSidebarDrag(e);
-		orderedTeams = e.detail.items;
-	}
-
-	function handleTeamsFinalize(e: SidebarDndEvent<Team>) {
-		orderedTeams = e.detail.items;
-		saveOrder(
-			'teams',
-			orderedTeams.map((team) => team.id)
-		);
-		sidebarState.teams = orderedTeams;
-		clearActiveSidebarDrag();
-	}
-
 	function handleViewsConsider(e: SidebarDndEvent<View>) {
 		updateActiveSidebarDrag(e);
 		orderedViews = replaceOrderedGroup(orderedViews, e.detail.items);
 	}
 
 	function handleViewsFinalize(e: SidebarDndEvent<View>) {
-		orderedViews = replaceOrderedGroup(orderedViews, e.detail.items);
-		saveOrder(
-			'views',
-			orderedViews.map((view) => view.id)
-		);
-		clearActiveSidebarDrag();
-	}
-
-	function handleTeamViewsConsider(e: SidebarDndEvent<View>) {
-		updateActiveSidebarDrag(e);
-		orderedViews = replaceOrderedGroup(orderedViews, e.detail.items);
-	}
-
-	function handleTeamViewsFinalize(e: SidebarDndEvent<View>) {
 		orderedViews = replaceOrderedGroup(orderedViews, e.detail.items);
 		saveOrder(
 			'views',
@@ -760,11 +679,9 @@
 								{@const href =
 									fav.entity_type === 'project'
 										? `/${slug}/projects/${fav.entity_id}`
-										: fav.entity_type === 'team'
-											? `/${slug}/teams/${fav.entity_id}`
-											: fav.entity_type === 'view'
-												? `/${slug}/views/${fav.entity_id}`
-												: `/${slug}/my-issues`}
+										: fav.entity_type === 'view'
+											? `/${slug}/views/${fav.entity_id}`
+											: `/${slug}/my-issues`}
 								<a
 									{href}
 									class="flex items-center gap-2 rounded-md px-2 py-1 text-sm {isActive(href)
@@ -779,325 +696,6 @@
 					{/if}
 				</div>
 			{/if}
-
-			<!-- Teams -->
-			<div class="group/teams mt-4">
-				<div
-					role="button"
-					tabindex="0"
-					class="flex cursor-pointer items-center justify-between px-2 py-1"
-					onclick={() => (teamsCollapsed = toggleSection('teams', teamsCollapsed))}
-					onkeydown={(e) => {
-						if (e.key === 'Enter' || e.key === ' ') {
-							e.preventDefault();
-							teamsCollapsed = toggleSection('teams', teamsCollapsed);
-						}
-					}}
-				>
-					<span class="flex items-center gap-1">
-						<span class="text-[11px] font-semibold text-[var(--color-text-secondary)]">{m['sidebar.teams']()}</span>
-						<ChevronDown
-							size={12}
-							class="text-[var(--color-text-tertiary)] transition-transform {teamsCollapsed ? '-rotate-90' : ''}"
-						/>
-					</span>
-					{#if oncreateteam}
-						<button
-							onclick={(e) => {
-								e.stopPropagation();
-								oncreateteam?.();
-							}}
-							class="rounded p-0.5 text-[var(--color-text-tertiary)] opacity-0 transition-opacity group-hover/teams:opacity-100 hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-secondary)]"
-							title={m['sidebar.create_team']()}
-						>
-							<Plus size={14} />
-						</button>
-					{/if}
-				</div>
-				{#if !teamsCollapsed}
-					<div
-						transition:slideFade
-						use:dndzone={{ items: orderedTeams, type: 'sidebar-team', ...dragOptions }}
-						onconsider={handleTeamsConsider}
-						onfinalize={handleTeamsFinalize}
-					>
-						{#each orderedTeams as team (team.id)}
-							{@const teamExpanded = !collapsedTeams.has(team.id)}
-							{@const teamProjects = orderedProjects.filter((p) => p.team_id === team.id)}
-							{@const teamViews = orderedViews.filter((view) => isTeamView(view, team.id))}
-							<div
-								animate:flip={{ duration: sidebarDndFlipMs }}
-								class="transition-[transform,opacity] duration-150 {activeSidebarDragId === team.id
-									? 'opacity-60'
-									: ''}"
-							>
-								<ContextMenu.Root>
-									<ContextMenu.Trigger class="block">
-										<!-- svelte-ignore a11y_no_static_element_interactions -->
-										<div
-											data-sidebar-drag-row
-											class="group/team flex items-center rounded-md hover:bg-[var(--color-bg-hover)]"
-										>
-											<button
-												onclick={() => toggleTeam(team.id)}
-												class="flex min-w-0 flex-1 items-center gap-2 px-2 py-1 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-											>
-												<TeamIcon {team} />
-												<span class="truncate">{team.name}</span>
-												<ChevronDown
-													size={12}
-													class="shrink-0 text-[var(--color-text-tertiary)] transition-transform {teamExpanded
-														? ''
-														: '-rotate-90'}"
-												/>
-											</button>
-											<DropdownMenu.Root>
-												<DropdownMenu.Trigger
-													class="mr-1 shrink-0 rounded p-0.5 text-[var(--color-text-tertiary)] opacity-0 group-hover/team:opacity-100 data-[state=open]:opacity-100 hover:bg-[var(--color-bg-tertiary)] hover:text-[var(--color-text-secondary)]"
-													onclick={(e) => e.stopPropagation()}
-												>
-													<Ellipsis size={14} />
-												</DropdownMenu.Trigger>
-												<DropdownMenu.Content side="right" align="start" class="w-44">
-													<DropdownMenu.Item onclick={() => goto(`/${slug}/settings/teams/${team.id}`)}>
-														<Settings size={14} class="mr-2" />
-														{m['sidebar.team_settings']()}
-													</DropdownMenu.Item>
-													<DropdownMenu.Separator />
-													<DropdownMenu.Item onclick={() => onleaveteam?.(team)} class="text-[var(--color-error)]">
-														<LogOut size={14} class="mr-2" />
-														{m['sidebar.leave_team']()}
-													</DropdownMenu.Item>
-													<DropdownMenu.Item onclick={() => ondeleteteam?.(team)} class="text-[var(--color-error)]">
-														<Trash2 size={14} class="mr-2" />
-														{m['sidebar.delete_team']()}
-													</DropdownMenu.Item>
-												</DropdownMenu.Content>
-											</DropdownMenu.Root>
-										</div>
-									</ContextMenu.Trigger>
-									<ContextMenu.Content class="w-44">
-										<ContextMenu.Item onclick={() => goto(`/${slug}/teams/${team.id}`)}>
-											<SquareUser class={menuIconClass} />
-											{m['sidebar.open_team']()}
-										</ContextMenu.Item>
-										<ContextMenu.Item onclick={() => goto(`/${slug}/settings/teams/${team.id}`)}>
-											<Settings class={menuIconClass} />
-											{m['sidebar.team_settings']()}
-										</ContextMenu.Item>
-										<ContextMenu.Separator />
-										<ContextMenu.Item
-											onclick={() => onleaveteam?.(team)}
-											class="text-[var(--color-error)] focus:text-[var(--color-error)]"
-										>
-											<LogOut class={menuIconClass} />
-											{m['sidebar.leave_team']()}
-										</ContextMenu.Item>
-										<ContextMenu.Item
-											onclick={() => ondeleteteam?.(team)}
-											class="text-[var(--color-error)] focus:text-[var(--color-error)]"
-										>
-											<Trash2 class={menuIconClass} />
-											{m['sidebar.delete_team']()}
-										</ContextMenu.Item>
-									</ContextMenu.Content>
-								</ContextMenu.Root>
-								{#if teamExpanded}
-									<div transition:slideFade>
-										<a
-											href="/{slug}/teams/{team.id}"
-											class="ml-4 flex items-center gap-2 rounded-md px-2 py-1 text-xs {isActive(
-												`/${slug}/teams/${team.id}`
-											) &&
-											!isActive(`/${slug}/teams/${team.id}/cycles`) &&
-											!isActive(`/${slug}/teams/${team.id}/triage`) &&
-											!isActive(`/${slug}/teams/${team.id}/projects`) &&
-											!isActive(`/${slug}/teams/${team.id}/views`)
-												? 'bg-[var(--color-bg-hover)]/50 text-[var(--color-text-primary)]'
-												: 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]'}"
-										>
-											<SquaresSubtract size={13} />
-											{m['sidebar.issues']()}
-										</a>
-										<a
-											href="/{slug}/teams/{team.id}/cycles"
-											class="ml-4 flex items-center gap-2 rounded-md px-2 py-1 text-xs {isActive(
-												`/${slug}/teams/${team.id}/cycles`
-											)
-												? 'bg-[var(--color-bg-hover)]/50 text-[var(--color-text-primary)]'
-												: 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]'}"
-										>
-											<RefreshCcwDot size={13} />
-											{m['sidebar.cycles']()}
-										</a>
-										<a
-											href="/{slug}/teams/{team.id}/projects"
-											class="ml-4 flex items-center gap-2 rounded-md px-2 py-1 text-xs {isActive(
-												`/${slug}/teams/${team.id}/projects`
-											)
-												? 'bg-[var(--color-bg-hover)]/50 text-[var(--color-text-primary)]'
-												: 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]'}"
-										>
-											<Box size={13} />
-											{m['sidebar.projects']()}
-										</a>
-										{#if teamProjects.length > 0}
-											<div class="relative ml-[31px]">
-												<div class="absolute left-0 top-0 bottom-2 w-px bg-[var(--app-border-hover)]"></div>
-												<div
-													use:dndzone={{ items: teamProjects, type: `sidebar-project-${team.id}`, ...dragOptions }}
-													onconsider={handleProjectsConsider}
-													onfinalize={handleProjectsFinalize}
-												>
-													{#each teamProjects as project (project.id)}
-														<div
-															animate:flip={{ duration: sidebarDndFlipMs }}
-															class="transition-[transform,opacity] duration-150 {activeSidebarDragId === project.id
-																? 'opacity-60'
-																: ''}"
-														>
-															<ContextMenu.Root>
-																<ContextMenu.Trigger class="block">
-																	<a
-																		data-sidebar-drag-row
-																		href="/{slug}/projects/{project.id}"
-																		class="relative flex items-center gap-2 rounded-md px-2 py-1 text-xs {isActive(
-																			`/${slug}/projects/${project.id}`
-																		)
-																			? 'bg-[var(--color-bg-hover)]/50 text-[var(--color-text-primary)]'
-																			: 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]'}"
-																	>
-																		<span class="ml-2 truncate capitalize">{project.name}</span>
-																	</a>
-																</ContextMenu.Trigger>
-																<ContextMenu.Content class="w-44">
-																	<ContextMenu.Item onclick={() => goto(`/${slug}/projects/${project.id}`)}>
-																		<Box class={menuIconClass} />
-																		{m['sidebar.open_project']()}
-																	</ContextMenu.Item>
-																	<ContextMenu.Item
-																		onclick={() => window.open(`/${slug}/projects/${project.id}`, '_blank')}
-																	>
-																		<ArrowUpRight class={menuIconClass} />
-																		{m['sidebar.open_in_new_tab']()}
-																	</ContextMenu.Item>
-																	<ContextMenu.Item onclick={() => copyLink(`/${slug}/projects/${project.id}`)}>
-																		<Copy class={menuIconClass} />
-																		{m['sidebar.copy_link']()}
-																	</ContextMenu.Item>
-																	<ContextMenu.Separator />
-																	<ContextMenu.Item
-																		onclick={() => handleDeleteProject(project)}
-																		class="text-[var(--color-error)] focus:text-[var(--color-error)]"
-																	>
-																		<Trash2 class={menuIconClass} />
-																		{m['sidebar.delete_project']()}
-																	</ContextMenu.Item>
-																</ContextMenu.Content>
-															</ContextMenu.Root>
-														</div>
-													{/each}
-												</div>
-											</div>
-										{/if}
-										<a
-											href="/{slug}/teams/{team.id}/views"
-											class="ml-4 flex items-center gap-2 rounded-md px-2 py-1 text-xs {isActive(
-												`/${slug}/teams/${team.id}/views`
-											)
-												? 'bg-[var(--color-bg-hover)]/50 text-[var(--color-text-primary)]'
-												: 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]'}"
-										>
-											<Layers size={13} />
-											{m['sidebar.views']()}
-										</a>
-										{#if team.triage_enabled}
-											<a
-												href="/{slug}/teams/{team.id}/triage"
-												class="ml-4 flex items-center gap-2 rounded-md px-2 py-1 text-xs {isActive(
-													`/${slug}/teams/${team.id}/triage`
-												)
-													? 'bg-[var(--color-bg-hover)]/50 text-[var(--color-text-primary)]'
-													: 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]'}"
-											>
-												<ShieldCheck size={13} />
-												{m['sidebar.triage']()}
-											</a>
-										{/if}
-										{#if teamViews.length > 0}
-											<div class="relative ml-[31px]">
-												<div class="absolute left-0 top-0 bottom-2 w-px bg-[var(--app-border-hover)]"></div>
-												<div
-													use:dndzone={{ items: teamViews, type: `sidebar-view-${team.id}`, ...dragOptions }}
-													onconsider={handleTeamViewsConsider}
-													onfinalize={handleTeamViewsFinalize}
-												>
-													{#each teamViews as view (view.id)}
-														<div
-															animate:flip={{ duration: sidebarDndFlipMs }}
-															class="transition-[transform,opacity] duration-150 {activeSidebarDragId === view.id
-																? 'opacity-60'
-																: ''}"
-														>
-															<ContextMenu.Root>
-																<ContextMenu.Trigger class="block">
-																	<a
-																		data-sidebar-drag-row
-																		href="/{slug}/views/{view.id}"
-																		class="relative flex items-center gap-2 rounded-md px-2 py-1 text-xs {isActive(
-																			`/${slug}/views/${view.id}`
-																		)
-																			? 'bg-[var(--color-bg-hover)]/50 text-[var(--color-text-primary)]'
-																			: 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]'}"
-																	>
-																		<Layers size={13} />
-																		{view.name}
-																	</a>
-																</ContextMenu.Trigger>
-																<ContextMenu.Content class="w-44">
-																	<ContextMenu.Item onclick={() => goto(`/${slug}/views/${view.id}`)}>
-																		<Layers class={menuIconClass} />
-																		{m['sidebar.open_view']()}
-																	</ContextMenu.Item>
-																	<ContextMenu.Item onclick={() => window.open(`/${slug}/views/${view.id}`, '_blank')}>
-																		<ArrowUpRight class={menuIconClass} />
-																		{m['sidebar.open_in_new_tab']()}
-																	</ContextMenu.Item>
-																	<ContextMenu.Item onclick={() => copyLink(`/${slug}/views/${view.id}`)}>
-																		<Copy class={menuIconClass} />
-																		{m['sidebar.copy_link']()}
-																	</ContextMenu.Item>
-																	<ContextMenu.Separator />
-																	<ContextMenu.Item
-																		onclick={() => requestDeleteView(view)}
-																		class="text-[var(--color-error)] focus:text-[var(--color-error)]"
-																	>
-																		<Trash2 class={menuIconClass} />
-																		{m['sidebar.delete_view']()}
-																	</ContextMenu.Item>
-																</ContextMenu.Content>
-															</ContextMenu.Root>
-														</div>
-													{/each}
-												</div>
-											</div>
-										{/if}
-									</div>
-								{/if}
-							</div>
-						{/each}
-						{#if teams.length === 0}
-							<button
-								onclick={oncreateteam}
-								class="flex w-full items-center gap-2 rounded-md px-2 py-1 text-sm text-[var(--color-text-tertiary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]"
-							>
-								<Plus size={14} />
-								{m['sidebar.create_first_team']()}
-							</button>
-						{/if}
-					</div>
-				{/if}
-			</div>
 
 			<!-- Views -->
 			{#if personalViews.length > 0 || workspaceViews.length > 0}
@@ -1190,12 +788,12 @@
 				</div>
 			{/if}
 
-			<!-- Projects -->
+			<!-- Projects (expanded by default, showing the project list) -->
 			<div class="mt-4">
 				<button
 					type="button"
 					class="flex w-full cursor-pointer items-center justify-between px-2 py-1"
-					onclick={() => (projectsCollapsed = toggleSection('projects', projectsCollapsed))}
+					onclick={() => (projectsCollapsed = !projectsCollapsed)}
 				>
 					<span class="flex items-center gap-1">
 						<span class="text-[11px] font-semibold text-[var(--color-text-secondary)]">{m['sidebar.projects']()}</span>
@@ -1216,6 +814,64 @@
 							<Box size={16} />
 							{m['sidebar.all_projects']()}
 						</a>
+						{#if orderedProjects.length > 0}
+							<div
+								transition:slideFade
+								use:dndzone={{ items: orderedProjects, type: 'sidebar-project', ...dragOptions }}
+								onconsider={handleProjectsConsider}
+								onfinalize={handleProjectsFinalize}
+							>
+								{#each orderedProjects as project (project.id)}
+									<div
+										animate:flip={{ duration: sidebarDndFlipMs }}
+										class="transition-[transform,opacity] duration-150 {activeSidebarDragId === project.id
+											? 'opacity-60'
+											: ''}"
+									>
+										<ContextMenu.Root>
+											<ContextMenu.Trigger class="block">
+												<a
+													data-sidebar-drag-row
+													href="/{slug}/projects/{project.id}"
+													class="flex items-center gap-2 rounded-md px-2 py-1 pl-6 text-sm {isActive(
+														`/${slug}/projects/${project.id}`
+													)
+														? 'bg-[var(--color-bg-hover)]/50 text-[var(--color-text-primary)]'
+														: 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]'}"
+												>
+													<Box size={14} class="shrink-0 text-[var(--color-text-tertiary)]" />
+													<span class="truncate">{project.name}</span>
+												</a>
+											</ContextMenu.Trigger>
+											<ContextMenu.Content class="w-44">
+												<ContextMenu.Item onclick={() => goto(`/${slug}/projects/${project.id}`)}>
+													<Box class={menuIconClass} />
+													{m['sidebar.open_project']()}
+												</ContextMenu.Item>
+												<ContextMenu.Item
+													onclick={() => window.open(`/${slug}/projects/${project.id}`, '_blank')}
+												>
+													<ArrowUpRight class={menuIconClass} />
+													{m['sidebar.open_in_new_tab']()}
+												</ContextMenu.Item>
+												<ContextMenu.Item onclick={() => copyLink(`/${slug}/projects/${project.id}`)}>
+													<Copy class={menuIconClass} />
+													{m['sidebar.copy_link']()}
+												</ContextMenu.Item>
+												<ContextMenu.Separator />
+												<ContextMenu.Item
+													onclick={() => handleDeleteProject(project)}
+													class="text-[var(--color-error)] focus:text-[var(--color-error)]"
+												>
+													<Trash2 class={menuIconClass} />
+													{m['sidebar.delete_project']()}
+												</ContextMenu.Item>
+											</ContextMenu.Content>
+										</ContextMenu.Root>
+									</div>
+								{/each}
+							</div>
+						{/if}
 					</div>
 				{/if}
 			</div>

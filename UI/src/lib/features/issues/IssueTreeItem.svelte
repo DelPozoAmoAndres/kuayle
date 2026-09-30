@@ -3,7 +3,6 @@
 	import type { WorkspaceMember } from '$lib/types/workspace';
 	import type { Label } from '$lib/types/label';
 	import type { Project } from '$lib/types/project';
-	import type { Cycle } from '$lib/types/cycle';
 	import IssueRow from './IssueRow.svelte';
 	import SubIssuesList from './SubIssuesList.svelte';
 
@@ -13,7 +12,6 @@
 		members = [],
 		labels = [],
 		projects = [],
-		cycles = [],
 		lastSelectedId = null,
 		singleSelect = false,
 		onclick,
@@ -26,7 +24,6 @@
 		members?: WorkspaceMember[];
 		labels?: Label[];
 		projects?: Project[];
-		cycles?: Cycle[];
 		lastSelectedId?: string | null;
 		singleSelect?: boolean;
 		onclick: (issue: Issue) => void;
@@ -43,7 +40,6 @@
 		{members}
 		{labels}
 		{projects}
-		{cycles}
 		{lastSelectedId}
 		{singleSelect}
 		{onclick}

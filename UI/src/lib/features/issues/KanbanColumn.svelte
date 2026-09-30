@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Issue } from '$lib/types/issue';
-	import type { TeamStatus } from '$lib/types/team-status';
+	import type { WorkspaceStatus } from '$lib/types/status';
 	import type { WorkspaceMember } from '$lib/types/workspace';
 	import type { Label } from '$lib/types/label';
 	import IssueStatusIcon from './IssueStatusIcon.svelte';
@@ -11,7 +11,7 @@
 
 	let {
 		statusId,
-		teamStatus,
+		status,
 		issues,
 		slug = '',
 		members = [],
@@ -21,7 +21,7 @@
 		onfinalize
 	}: {
 		statusId: string;
-		teamStatus: TeamStatus;
+		status: WorkspaceStatus;
 		issues: Issue[];
 		slug?: string;
 		members?: WorkspaceMember[];
@@ -42,9 +42,9 @@
 
 <div class="flex w-72 shrink-0 flex-col">
 	<div class="flex items-center gap-2 px-2 py-2">
-		<IssueStatusIcon category={teamStatus.category} color={teamStatus.color} />
+		<IssueStatusIcon category={status.category} color={status.color} />
 		<span class="text-sm font-medium text-[var(--color-text-primary)]"
-			>{teamStatus.name}</span
+			>{status.name}</span
 		>
 		<span class="text-xs text-[var(--color-text-tertiary)]">{issues.length}</span>
 	</div>

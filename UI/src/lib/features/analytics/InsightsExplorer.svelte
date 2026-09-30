@@ -33,7 +33,7 @@
 	import IssueStatusIcon from '$lib/features/issues/IssueStatusIcon.svelte';
 	import IssuePriorityIcon from '$lib/features/issues/IssuePriorityIcon.svelte';
 	import type { IssuePriority } from '$lib/types/issue';
-	import type { TeamStatus } from '$lib/types/team-status';
+	import type { WorkspaceStatus } from '$lib/types/status';
 	import AnalyticsDateRangePicker from './AnalyticsDateRangePicker.svelte';
 	import { getAnalyticsChartTheme, observeAnalyticsTheme, seriesChartColor, statusChartColor } from './chart-theme';
 	import { m } from '$lib/paraglide/messages.js';
@@ -44,7 +44,7 @@
 		filters = {},
 		embedded = false,
 		statuses = []
-	}: { slug: string; filters?: AnalyticsFilterParams; embedded?: boolean; statuses?: TeamStatus[] } = $props();
+	}: { slug: string; filters?: AnalyticsFilterParams; embedded?: boolean; statuses?: WorkspaceStatus[] } = $props();
 
 	let loading = $state(false);
 	let error = $state<string | null>(null);
@@ -85,9 +85,7 @@
 		{ value: 'status_type' as const, icon: Layers3 },
 		{ value: 'priority' as const, icon: Flag },
 		{ value: 'assignee' as const, icon: User },
-		{ value: 'team' as const, icon: Users },
 		{ value: 'project' as const, icon: FolderKanban },
-		{ value: 'cycle' as const, icon: RefreshCcw },
 		{ value: 'label' as const, icon: Tag },
 		{ value: 'creator' as const, icon: User }
 	];
@@ -98,13 +96,11 @@
 		status_type: m['insights.slice_status_type'](),
 		priority: m['insights.slice_priority'](),
 		assignee: m['insights.slice_assignee'](),
-		team: m['insights.slice_team'](),
 		project: m['insights.slice_project'](),
-		cycle: m['insights.slice_cycle'](),
 		label: m['insights.slice_label'](),
 		creator: m['insights.slice_creator']()
 	});
-	const availableSlices = $derived(SLICES.filter((item) => item.value !== 'status' || !!filters.team_id));
+	const availableSlices = $derived(SLICES);
 
 	function isMeasure(value: string | null): value is AnalyticsMeasure {
 		return value !== null && MEASURES.some((item) => item.value === value);
@@ -139,8 +135,6 @@
 
 	// Prevent invalid segment = slice
 	$effect(() => {
-		if (!filters.team_id && slice === 'status') slice = 'status_type';
-		if (!filters.team_id && segment === 'status') segment = 'none';
 		if (slice === 'none' || segment === slice) {
 			segment = 'none';
 		}
@@ -161,7 +155,7 @@
 			}
 		};
 		set('measure', measure, 'issue_count');
-		set('slice', slice, filters.team_id ? 'status' : 'status_type');
+		set('slice', slice, 'status_type');
 		set('segment', segment, 'none');
 		set('from', fromDate, '');
 		set('to', toDate, '');
@@ -492,9 +486,7 @@
 	function seedDrilldownParams(): URLSearchParams {
 		const p = new URLSearchParams();
 		const scopedFilters: Array<[string, string | undefined]> = [
-			['team', filters.team_id],
 			['project', filters.project_id],
-			['cycle', filters.cycle_id],
 			['assignee', filters.assignee_id],
 			['creator', filters.creator_id],
 			['status', filters.status_id],
@@ -513,7 +505,6 @@
 		const lower = value.toLowerCase();
 		if (sliceKey === 'assignee' && (lower === 'unassigned' || NULL_DRILLDOWN_KEYS.has(lower))) return 'none';
 		if (sliceKey === 'project' && (lower === 'no-project' || NULL_DRILLDOWN_KEYS.has(lower))) return 'none';
-		if (sliceKey === 'cycle' && (lower === 'no-cycle' || NULL_DRILLDOWN_KEYS.has(lower))) return 'none';
 		if (sliceKey === 'label' && (lower === 'no-label' || NULL_DRILLDOWN_KEYS.has(lower))) return 'none';
 		return value;
 	}
@@ -529,15 +520,13 @@
 		else if (currentSlice === 'priority') p.set('priority', normalizedKey);
 		else if (currentSlice === 'assignee') p.set('assignee', normalizedKey);
 		else if (currentSlice === 'project') p.set('project', normalizedKey);
-		else if (currentSlice === 'cycle') p.set('cycle', normalizedKey);
-		else if (currentSlice === 'team') p.set('team', normalizedKey);
 		else if (currentSlice === 'label') p.set('label', normalizedKey);
 		else if (currentSlice === 'creator') p.set('creator', normalizedKey);
 		const qs = p.toString();
 		if (qs) goto(`/${ws}/my-issues?${qs}`);
 	}
 
-	function statusForGroup(key: string): TeamStatus | undefined {
+	function statusForGroup(key: string): WorkspaceStatus | undefined {
 		return statuses.find((status) => status.id === key);
 	}
 </script>

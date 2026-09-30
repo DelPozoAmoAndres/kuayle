@@ -3,7 +3,7 @@
 	import { getLocale, setLocale } from '$lib/paraglide/runtime.js';
 	import type { AnalyticsOverview } from '$lib/api/analytics';
 
-	let { overview, teamScoped = false }: { overview: AnalyticsOverview | null; teamScoped?: boolean } = $props();
+	let { overview }: { overview: AnalyticsOverview | null } = $props();
 
 	function fmt(num: number | undefined | null): string {
 		if (num == null) return '-';
@@ -36,7 +36,7 @@
 		{ label: m['insights.avg_lead_time'](), value: hours(overview?.avg_lead_time_hours) },
 		{ label: m['insights.avg_cycle_time'](), value: hours(overview?.avg_cycle_time_hours) },
 		{ label: m['insights.total_projects'](), value: fmt(overview?.total_projects) },
-		{ label: teamScoped ? m['insights.team_members']() : m['insights.members'](), value: fmt(overview?.total_members) }
+		{ label: m['insights.members'](), value: fmt(overview?.total_members) }
 	]);
 </script>
 

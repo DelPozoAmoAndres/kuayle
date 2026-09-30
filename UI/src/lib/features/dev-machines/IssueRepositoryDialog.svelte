@@ -85,7 +85,7 @@
 							<ChevronsUpDown class="size-3.5 shrink-0 text-[var(--color-text-tertiary)]" />
 						</Button>
 					{/snippet}
-					<Command.Item value="Use project team or workspace default" data-checked={repositoryId === 'inherit'} onSelect={() => { repositoryId = 'inherit'; repositoryOpen = false; }} class="text-[var(--color-text-tertiary)]">Use project, team, or workspace default</Command.Item>
+					<Command.Item value="Use project or workspace default" data-checked={repositoryId === 'inherit'} onSelect={() => { repositoryId = 'inherit'; repositoryOpen = false; }} class="text-[var(--color-text-tertiary)]">Use project or workspace default</Command.Item>
 					{#each repositories as repository (repository.id)}
 						<Command.Item value={repository.full_name} data-checked={repositoryId === repository.id} onSelect={() => { repositoryId = repository.id; repositoryOpen = false; }} class="flex items-center gap-2"><GitBranch class="size-3.5 text-[var(--color-text-tertiary)]" /><span class="truncate">{repository.full_name}</span></Command.Item>
 					{/each}

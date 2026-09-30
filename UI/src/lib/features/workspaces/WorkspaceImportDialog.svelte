@@ -24,7 +24,7 @@
 
 	const importantCounts = $derived(
 		preview
-			? ['teams', 'projects', 'issues', 'comments', 'assets'].map((key) => ({
+			? ['projects', 'issues', 'comments', 'assets'].map((key) => ({
 					key,
 					value: preview?.manifest.counts[key] ?? 0
 				}))
@@ -103,7 +103,7 @@
 		</Dialog.Header>
 		{#if preview}
 			<div class="space-y-4 py-2">
-				<div class="grid grid-cols-5 gap-2">
+				<div class="grid grid-cols-4 gap-2">
 					{#each importantCounts as count}
 						<div class="rounded-md border border-[var(--app-border)] bg-[var(--color-bg)] p-2 text-center">
 							<p class="text-base font-semibold text-[var(--color-text-primary)]">{count.value}</p>

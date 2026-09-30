@@ -2,9 +2,7 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { listProjects, createProject } from '$lib/api/projects';
-	import { listTeams } from '$lib/api/teams';
 	import type { Project, ProjectStatus } from '$lib/types/project';
-	import type { Team } from '$lib/types/team';
 	import EmptyState from '$lib/components/shared/EmptyState.svelte';
 	import CreateProjectDialog from '$lib/features/projects/CreateProjectDialog.svelte';
 	import { Badge } from '$lib/components/ui/badge';
@@ -17,7 +15,6 @@
 
 	const slug = $derived(page.params.workspaceSlug ?? '');
 	let projects = $state<Project[]>([]);
-	let teams = $state<Team[]>([]);
 	let loading = $state(true);
 	let showCreateProject = $state(false);
 
@@ -27,13 +24,13 @@
 
 	onMount(async () => {
 		try {
-			[projects, teams] = await Promise.all([listProjects(slug), listTeams(slug)]);
+			projects = await listProjects(slug);
 		} finally {
 			loading = false;
 		}
 	});
 
-	async function handleCreate(data: { name: string; description?: string; team_id?: string }) {
+	async function handleCreate(data: { name: string; description?: string }) {
 		try {
 			const project = await createProject(slug, data);
 			projects = [...projects, project];
@@ -95,12 +92,6 @@
 							<Badge variant={statusVariant(project.status)} class="text-[10px]">
 								{statusLabel(project.status)}
 							</Badge>
-							{#if project.team_id}
-								{@const team = teams.find(t => t.id === project.team_id)}
-								{#if team}
-									<span class="text-[10px] text-[var(--color-text-tertiary)]">{team.name}</span>
-								{/if}
-							{/if}
 						</div>
 						{#if project.description}
 							<p class="mt-0.5 truncate text-xs text-[var(--color-text-tertiary)]">{project.description}</p>
@@ -127,6 +118,5 @@
 
 <CreateProjectDialog
 	bind:open={showCreateProject}
-	{teams}
 	onsubmit={handleCreate}
 />

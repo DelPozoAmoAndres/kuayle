@@ -8,14 +8,12 @@ type CreateIssueRequest struct {
 	Status      string   `json:"status" validate:"omitempty,oneof=backlog todo in_progress in_review done cancelled"`
 	StatusID    *string  `json:"status_id" validate:"omitempty,uuid"`
 	Priority    *int     `json:"priority" validate:"omitempty,min=0,max=4"`
-	TeamID      *string  `json:"team_id" validate:"omitempty,uuid"`
 	ProjectID   *string  `json:"project_id" validate:"omitempty,uuid"`
 	AssigneeID  *string  `json:"assignee_id" validate:"omitempty,uuid"`
 	AssigneeIDs []string `json:"assignee_ids" validate:"omitempty,dive,uuid"`
 	LabelIDs    []string `json:"label_ids" validate:"omitempty,dive,uuid"`
 	ParentID    *string  `json:"parent_id" validate:"omitempty,uuid"`
 	DueDate     *string  `json:"due_date" validate:"omitempty"`
-	CycleID     *string  `json:"cycle_id" validate:"omitempty,uuid"`
 }
 
 type CreateSubIssueRequest struct {
@@ -29,7 +27,6 @@ type CreateSubIssueRequest struct {
 	AssigneeIDs []string `json:"assignee_ids" validate:"omitempty,dive,uuid"`
 	LabelIDs    []string `json:"label_ids" validate:"omitempty,dive,uuid"`
 	DueDate     *string  `json:"due_date" validate:"omitempty"`
-	CycleID     *string  `json:"cycle_id" validate:"omitempty,uuid"`
 }
 
 type BulkCreateSubIssueRequest struct {
@@ -46,11 +43,9 @@ type UpdateIssueRequest struct {
 	Status      *string  `json:"status" validate:"omitempty,oneof=backlog todo in_progress in_review done cancelled"`
 	StatusID    *string  `json:"status_id" validate:"omitempty,uuid"`
 	Priority    *int     `json:"priority" validate:"omitempty,min=0,max=4"`
-	TeamID      *string  `json:"team_id" validate:"omitempty,uuid"`
 	AssigneeID  *string  `json:"assignee_id" validate:"omitempty,uuid"`
 	AssigneeIDs []string `json:"assignee_ids" validate:"omitempty,dive,uuid"`
 	ProjectID   *string  `json:"project_id" validate:"omitempty,uuid"`
-	CycleID     *string  `json:"cycle_id" validate:"omitempty,uuid"`
 	LabelIDs    []string `json:"label_ids" validate:"omitempty,dive,uuid"`
 	ParentID    *string  `json:"parent_id" validate:"omitempty,uuid"`
 	DueDate     *string  `json:"due_date"`
@@ -66,9 +61,7 @@ type IssueResponse struct {
 	StatusID        *string                       `json:"status_id,omitempty"`
 	StatusInfo      *StatusInfoResponse           `json:"status_info,omitempty"`
 	Priority        int                           `json:"priority"`
-	TeamID          *string                       `json:"team_id"`
 	ProjectID       *string                       `json:"project_id"`
-	CycleID         *string                       `json:"cycle_id"`
 	CreatorID       string                        `json:"creator_id"`
 	AssigneeID      *string                       `json:"assignee_id"`
 	ParentID        *string                       `json:"parent_id"`
@@ -145,7 +138,6 @@ type BulkUpdateIssueRequest struct {
 	Priority   *int     `json:"priority" validate:"omitempty,min=0,max=4"`
 	AssigneeID *string  `json:"assignee_id" validate:"omitempty,uuid"`
 	LabelIDs   []string `json:"label_ids" validate:"omitempty,dive,uuid"`
-	CycleID    *string  `json:"cycle_id"`
 	ParentID   *string  `json:"parent_id"`
 }
 
@@ -164,9 +156,7 @@ type IssueFilterParams struct {
 	Priority   string `query:"priority"`
 	AssigneeID string `query:"assignee"`
 	CreatorID  string `query:"creator"`
-	TeamID     string `query:"team"`
 	ProjectID  string `query:"project"`
-	CycleID    string `query:"cycle"`
 	LabelID    string `query:"label"`
 	Search     string `query:"search"`
 	DueBefore  string `query:"due_before"`

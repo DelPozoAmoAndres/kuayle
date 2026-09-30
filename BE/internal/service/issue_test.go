@@ -25,8 +25,8 @@ func (m *mockIssueRepo) Create(ctx context.Context, tx *sqlx.Tx, issue *domain.I
 	return args.Error(0)
 }
 
-func (m *mockIssueRepo) NextNumber(ctx context.Context, tx *sqlx.Tx, teamID *uuid.UUID) (int, error) {
-	args := m.Called(ctx, tx, teamID)
+func (m *mockIssueRepo) NextNumber(ctx context.Context, tx *sqlx.Tx, workspaceID uuid.UUID, prefix string) (int, error) {
+	args := m.Called(ctx, tx, workspaceID, prefix)
 	return args.Int(0), args.Error(1)
 }
 
@@ -56,8 +56,8 @@ func (m *mockIssueRepo) Update(ctx context.Context, issue *domain.Issue) error {
 	return args.Error(0)
 }
 
-func (m *mockIssueRepo) UpdateTeam(ctx context.Context, tx *sqlx.Tx, issueID uuid.UUID, teamID *uuid.UUID, number int, identifier string) error {
-	args := m.Called(ctx, tx, issueID, teamID, number, identifier)
+func (m *mockIssueRepo) UpdateProjectKey(ctx context.Context, tx *sqlx.Tx, issueID uuid.UUID, projectID *uuid.UUID, number int, identifier string) error {
+	args := m.Called(ctx, tx, issueID, projectID, number, identifier)
 	return args.Error(0)
 }
 
@@ -106,8 +106,8 @@ func (m *mockIssueRepo) CycleIsActive(ctx context.Context, cycleID uuid.UUID) (b
 	return args.Bool(0), args.Error(1)
 }
 
-func (m *mockIssueRepo) BulkUpdate(ctx context.Context, workspaceID uuid.UUID, issueIDs []uuid.UUID, status *string, priority *int, assigneeID *uuid.UUID, statusID *uuid.UUID, cycleID *uuid.UUID, cycleSet bool) (int, error) {
-	args := m.Called(ctx, workspaceID, issueIDs, status, priority, assigneeID, statusID, cycleID, cycleSet)
+func (m *mockIssueRepo) BulkUpdate(ctx context.Context, workspaceID uuid.UUID, issueIDs []uuid.UUID, status *string, priority *int, assigneeID *uuid.UUID, statusID *uuid.UUID) (int, error) {
+	args := m.Called(ctx, workspaceID, issueIDs, status, priority, assigneeID, statusID)
 	return args.Int(0), args.Error(1)
 }
 
@@ -145,61 +145,6 @@ func (m *mockIssueRepo) GetByGiteaIssueIndex(ctx context.Context, workspaceID uu
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*domain.Issue), args.Error(1)
-}
-
-type mockTeamRepo struct {
-	mock.Mock
-}
-
-func (m *mockTeamRepo) Create(ctx context.Context, team *domain.Team) error {
-	args := m.Called(ctx, team)
-	return args.Error(0)
-}
-
-func (m *mockTeamRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.Team, error) {
-	args := m.Called(ctx, id)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*domain.Team), args.Error(1)
-}
-
-func (m *mockTeamRepo) ListByWorkspace(ctx context.Context, workspaceID uuid.UUID) ([]domain.Team, error) {
-	args := m.Called(ctx, workspaceID)
-	return args.Get(0).([]domain.Team), args.Error(1)
-}
-
-func (m *mockTeamRepo) Update(ctx context.Context, team *domain.Team) error {
-	args := m.Called(ctx, team)
-	return args.Error(0)
-}
-
-func (m *mockTeamRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	args := m.Called(ctx, id)
-	return args.Error(0)
-}
-
-func (m *mockTeamRepo) AddMember(ctx context.Context, member *domain.TeamMember) error {
-	args := m.Called(ctx, member)
-	return args.Error(0)
-}
-
-func (m *mockTeamRepo) GetMember(ctx context.Context, teamID, userID uuid.UUID) (*domain.TeamMember, error) {
-	args := m.Called(ctx, teamID, userID)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*domain.TeamMember), args.Error(1)
-}
-
-func (m *mockTeamRepo) ListMembers(ctx context.Context, teamID uuid.UUID) ([]domain.TeamMember, error) {
-	args := m.Called(ctx, teamID)
-	return args.Get(0).([]domain.TeamMember), args.Error(1)
-}
-
-func (m *mockTeamRepo) RemoveMember(ctx context.Context, teamID, userID uuid.UUID) error {
-	args := m.Called(ctx, teamID, userID)
-	return args.Error(0)
 }
 
 type mockNotificationRepo struct {
@@ -268,56 +213,56 @@ func (m *mockIssueHistoryRepo) ListByIssue(ctx context.Context, issueID uuid.UUI
 	return args.Get(0).([]domain.IssueHistory), args.Error(1)
 }
 
-type mockTeamStatusRepo struct {
+type mockStatusRepo struct {
 	mock.Mock
 }
 
-func (m *mockTeamStatusRepo) Create(ctx context.Context, status *domain.TeamStatus) error {
+func (m *mockStatusRepo) Create(ctx context.Context, status *domain.WorkspaceStatus) error {
 	args := m.Called(ctx, status)
 	return args.Error(0)
 }
 
-func (m *mockTeamStatusRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.TeamStatus, error) {
+func (m *mockStatusRepo) GetByID(ctx context.Context, id uuid.UUID) (*domain.WorkspaceStatus, error) {
 	args := m.Called(ctx, id)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).(*domain.TeamStatus), args.Error(1)
+	return args.Get(0).(*domain.WorkspaceStatus), args.Error(1)
 }
 
-func (m *mockTeamStatusRepo) GetByTeamAndSlug(ctx context.Context, teamID uuid.UUID, slug string) (*domain.TeamStatus, error) {
-	args := m.Called(ctx, teamID, slug)
-	if args.Get(0) == nil {
-		return nil, args.Error(1)
-	}
-	return args.Get(0).(*domain.TeamStatus), args.Error(1)
-}
-
-func (m *mockTeamStatusRepo) ListByTeam(ctx context.Context, teamID uuid.UUID) ([]domain.TeamStatus, error) {
-	args := m.Called(ctx, teamID)
-	return args.Get(0).([]domain.TeamStatus), args.Error(1)
-}
-
-func (m *mockTeamStatusRepo) Update(ctx context.Context, status *domain.TeamStatus) error {
-	args := m.Called(ctx, status)
-	return args.Error(0)
-}
-
-func (m *mockTeamStatusRepo) Delete(ctx context.Context, id uuid.UUID) error {
-	args := m.Called(ctx, id)
-	return args.Error(0)
-}
-
-func (m *mockTeamStatusRepo) GetByIDs(ctx context.Context, ids []uuid.UUID) ([]domain.TeamStatus, error) {
+func (m *mockStatusRepo) GetByIDs(ctx context.Context, ids []uuid.UUID) ([]domain.WorkspaceStatus, error) {
 	args := m.Called(ctx, ids)
 	if args.Get(0) == nil {
 		return nil, args.Error(1)
 	}
-	return args.Get(0).([]domain.TeamStatus), args.Error(1)
+	return args.Get(0).([]domain.WorkspaceStatus), args.Error(1)
 }
 
-func (m *mockTeamStatusRepo) NextPosition(ctx context.Context, teamID uuid.UUID) (int, error) {
-	args := m.Called(ctx, teamID)
+func (m *mockStatusRepo) GetByWorkspaceAndSlug(ctx context.Context, workspaceID uuid.UUID, slug string) (*domain.WorkspaceStatus, error) {
+	args := m.Called(ctx, workspaceID, slug)
+	if args.Get(0) == nil {
+		return nil, args.Error(1)
+	}
+	return args.Get(0).(*domain.WorkspaceStatus), args.Error(1)
+}
+
+func (m *mockStatusRepo) ListByWorkspace(ctx context.Context, workspaceID uuid.UUID) ([]domain.WorkspaceStatus, error) {
+	args := m.Called(ctx, workspaceID)
+	return args.Get(0).([]domain.WorkspaceStatus), args.Error(1)
+}
+
+func (m *mockStatusRepo) Update(ctx context.Context, status *domain.WorkspaceStatus) error {
+	args := m.Called(ctx, status)
+	return args.Error(0)
+}
+
+func (m *mockStatusRepo) Delete(ctx context.Context, id uuid.UUID) error {
+	args := m.Called(ctx, id)
+	return args.Error(0)
+}
+
+func (m *mockStatusRepo) NextPosition(ctx context.Context, workspaceID uuid.UUID) (int, error) {
+	args := m.Called(ctx, workspaceID)
 	return args.Int(0), args.Error(1)
 }
 
@@ -331,11 +276,10 @@ func newTestNotifSvc() *NotificationService {
 
 func TestIssueService_GetByIdentifier(t *testing.T) {
 	issueRepo := new(mockIssueRepo)
-	teamRepo := new(mockTeamRepo)
 	historyRepo := new(mockIssueHistoryRepo)
 	hub := realtime.NewHub()
-	teamStatusRepo := new(mockTeamStatusRepo)
-	svc := NewIssueService(issueRepo, teamRepo, teamStatusRepo, historyRepo, hub, newTestNotifSvc())
+	statusRepo := new(mockStatusRepo)
+	svc := NewIssueService(issueRepo, statusRepo, historyRepo, hub, newTestNotifSvc(), nil, nil)
 
 	ctx := context.Background()
 	wsID := uuid.New()
@@ -355,11 +299,10 @@ func TestIssueService_GetByIdentifier(t *testing.T) {
 
 func TestIssueService_List(t *testing.T) {
 	issueRepo := new(mockIssueRepo)
-	teamRepo := new(mockTeamRepo)
 	historyRepo := new(mockIssueHistoryRepo)
 	hub := realtime.NewHub()
-	teamStatusRepo := new(mockTeamStatusRepo)
-	svc := NewIssueService(issueRepo, teamRepo, teamStatusRepo, historyRepo, hub, newTestNotifSvc())
+	statusRepo := new(mockStatusRepo)
+	svc := NewIssueService(issueRepo, statusRepo, historyRepo, hub, newTestNotifSvc(), nil, nil)
 
 	ctx := context.Background()
 	wsID := uuid.New()
@@ -380,11 +323,10 @@ func TestIssueService_List(t *testing.T) {
 
 func TestIssueService_Delete(t *testing.T) {
 	issueRepo := new(mockIssueRepo)
-	teamRepo := new(mockTeamRepo)
 	historyRepo := new(mockIssueHistoryRepo)
 	hub := realtime.NewHub()
-	teamStatusRepo := new(mockTeamStatusRepo)
-	svc := NewIssueService(issueRepo, teamRepo, teamStatusRepo, historyRepo, hub, newTestNotifSvc())
+	statusRepo := new(mockStatusRepo)
+	svc := NewIssueService(issueRepo, statusRepo, historyRepo, hub, newTestNotifSvc(), nil, nil)
 
 	ctx := context.Background()
 	wsID := uuid.New()
@@ -407,11 +349,10 @@ func TestIssueService_Delete(t *testing.T) {
 
 func TestIssueService_Delete_NotFound(t *testing.T) {
 	issueRepo := new(mockIssueRepo)
-	teamRepo := new(mockTeamRepo)
 	historyRepo := new(mockIssueHistoryRepo)
 	hub := realtime.NewHub()
-	teamStatusRepo := new(mockTeamStatusRepo)
-	svc := NewIssueService(issueRepo, teamRepo, teamStatusRepo, historyRepo, hub, newTestNotifSvc())
+	statusRepo := new(mockStatusRepo)
+	svc := NewIssueService(issueRepo, statusRepo, historyRepo, hub, newTestNotifSvc(), nil, nil)
 
 	ctx := context.Background()
 	wsID := uuid.New()
@@ -426,11 +367,10 @@ func TestIssueService_Delete_NotFound(t *testing.T) {
 
 func TestIssueService_Update(t *testing.T) {
 	issueRepo := new(mockIssueRepo)
-	teamRepo := new(mockTeamRepo)
 	historyRepo := new(mockIssueHistoryRepo)
 	hub := realtime.NewHub()
-	teamStatusRepo := new(mockTeamStatusRepo)
-	svc := NewIssueService(issueRepo, teamRepo, teamStatusRepo, historyRepo, hub, newTestNotifSvc())
+	statusRepo := new(mockStatusRepo)
+	svc := NewIssueService(issueRepo, statusRepo, historyRepo, hub, newTestNotifSvc(), nil, nil)
 
 	ctx := context.Background()
 	wsID := uuid.New()
@@ -448,6 +388,7 @@ func TestIssueService_Update(t *testing.T) {
 	issueRepo.On("GetByIdentifier", ctx, wsID, "ENG-1").Return(issue, nil)
 	issueRepo.On("Update", ctx, mock.AnythingOfType("*domain.Issue")).Return(nil)
 	issueRepo.On("GetAssignees", ctx, issueID).Return([]uuid.UUID{}, nil)
+	statusRepo.On("GetByWorkspaceAndSlug", ctx, wsID, "todo").Return(nil, nil)
 
 	newTitle := "New Title"
 	newStatus := "todo"
@@ -468,12 +409,11 @@ func TestIssueService_Update(t *testing.T) {
 
 func TestIssueService_Update_NoOpDescriptionDoesNotNotify(t *testing.T) {
 	issueRepo := new(mockIssueRepo)
-	teamRepo := new(mockTeamRepo)
 	historyRepo := new(mockIssueHistoryRepo)
 	notifRepo := new(mockNotificationRepo)
 	hub := realtime.NewHub()
-	teamStatusRepo := new(mockTeamStatusRepo)
-	svc := NewIssueService(issueRepo, teamRepo, teamStatusRepo, historyRepo, hub, NewNotificationService(notifRepo))
+	statusRepo := new(mockStatusRepo)
+	svc := NewIssueService(issueRepo, statusRepo, historyRepo, hub, NewNotificationService(notifRepo), nil, nil)
 
 	ctx := context.Background()
 	wsID := uuid.New()
@@ -497,12 +437,11 @@ func TestIssueService_Update_NoOpDescriptionDoesNotNotify(t *testing.T) {
 
 func TestIssueService_Update_ConsolidatesFieldNotifications(t *testing.T) {
 	issueRepo := new(mockIssueRepo)
-	teamRepo := new(mockTeamRepo)
 	historyRepo := new(mockIssueHistoryRepo)
 	notifRepo := new(mockNotificationRepo)
 	hub := realtime.NewHub()
-	teamStatusRepo := new(mockTeamStatusRepo)
-	svc := NewIssueService(issueRepo, teamRepo, teamStatusRepo, historyRepo, hub, NewNotificationService(notifRepo))
+	statusRepo := new(mockStatusRepo)
+	svc := NewIssueService(issueRepo, statusRepo, historyRepo, hub, NewNotificationService(notifRepo), nil, nil)
 
 	ctx := context.Background()
 	wsID := uuid.New()
@@ -516,6 +455,7 @@ func TestIssueService_Update_ConsolidatesFieldNotifications(t *testing.T) {
 	issueRepo.On("GetByIdentifier", ctx, wsID, "ENG-1").Return(issue, nil)
 	issueRepo.On("Update", ctx, mock.AnythingOfType("*domain.Issue")).Return(nil)
 	issueRepo.On("GetAssignees", ctx, issueID).Return([]uuid.UUID{}, nil)
+	statusRepo.On("GetByWorkspaceAndSlug", ctx, wsID, "todo").Return(nil, nil)
 	historyRepo.On("Create", ctx, issueID, userID, "title", mock.AnythingOfType("*string"), &newTitle).Return(nil)
 	historyRepo.On("Create", ctx, issueID, userID, "status", mock.AnythingOfType("*string"), &newStatus).Return(nil)
 	notifRepo.On("CreateOrRefresh", ctx, mock.MatchedBy(func(n *domain.Notification) bool {
@@ -532,12 +472,11 @@ func TestIssueService_Update_ConsolidatesFieldNotifications(t *testing.T) {
 
 func TestIssueService_Update_MentionNotificationStaysSeparate(t *testing.T) {
 	issueRepo := new(mockIssueRepo)
-	teamRepo := new(mockTeamRepo)
 	historyRepo := new(mockIssueHistoryRepo)
 	notifRepo := new(mockNotificationRepo)
 	hub := realtime.NewHub()
-	teamStatusRepo := new(mockTeamStatusRepo)
-	svc := NewIssueService(issueRepo, teamRepo, teamStatusRepo, historyRepo, hub, NewNotificationService(notifRepo))
+	statusRepo := new(mockStatusRepo)
+	svc := NewIssueService(issueRepo, statusRepo, historyRepo, hub, NewNotificationService(notifRepo), nil, nil)
 
 	ctx := context.Background()
 	wsID := uuid.New()
@@ -570,11 +509,10 @@ func TestIssueService_Update_MentionNotificationStaysSeparate(t *testing.T) {
 
 func TestIssueService_Update_SetParent(t *testing.T) {
 	issueRepo := new(mockIssueRepo)
-	teamRepo := new(mockTeamRepo)
 	historyRepo := new(mockIssueHistoryRepo)
 	hub := realtime.NewHub()
-	teamStatusRepo := new(mockTeamStatusRepo)
-	svc := NewIssueService(issueRepo, teamRepo, teamStatusRepo, historyRepo, hub, newTestNotifSvc())
+	statusRepo := new(mockStatusRepo)
+	svc := NewIssueService(issueRepo, statusRepo, historyRepo, hub, newTestNotifSvc(), nil, nil)
 
 	ctx := context.Background()
 	wsID := uuid.New()
@@ -603,11 +541,10 @@ func TestIssueService_Update_SetParent(t *testing.T) {
 
 func TestIssueService_Update_RejectsSelfParent(t *testing.T) {
 	issueRepo := new(mockIssueRepo)
-	teamRepo := new(mockTeamRepo)
 	historyRepo := new(mockIssueHistoryRepo)
 	hub := realtime.NewHub()
-	teamStatusRepo := new(mockTeamStatusRepo)
-	svc := NewIssueService(issueRepo, teamRepo, teamStatusRepo, historyRepo, hub, newTestNotifSvc())
+	statusRepo := new(mockStatusRepo)
+	svc := NewIssueService(issueRepo, statusRepo, historyRepo, hub, newTestNotifSvc(), nil, nil)
 
 	ctx := context.Background()
 	wsID := uuid.New()
@@ -627,11 +564,10 @@ func TestIssueService_Update_RejectsSelfParent(t *testing.T) {
 
 func TestIssueService_Update_RejectsParentCycle(t *testing.T) {
 	issueRepo := new(mockIssueRepo)
-	teamRepo := new(mockTeamRepo)
 	historyRepo := new(mockIssueHistoryRepo)
 	hub := realtime.NewHub()
-	teamStatusRepo := new(mockTeamStatusRepo)
-	svc := NewIssueService(issueRepo, teamRepo, teamStatusRepo, historyRepo, hub, newTestNotifSvc())
+	statusRepo := new(mockStatusRepo)
+	svc := NewIssueService(issueRepo, statusRepo, historyRepo, hub, newTestNotifSvc(), nil, nil)
 
 	ctx := context.Background()
 	wsID := uuid.New()
@@ -653,58 +589,28 @@ func TestIssueService_Update_RejectsParentCycle(t *testing.T) {
 	issueRepo.AssertExpectations(t)
 }
 
-func TestIssueService_BulkUpdate_SetsCycle(t *testing.T) {
+func TestIssueService_BulkUpdate_SetsStatus(t *testing.T) {
 	issueRepo := new(mockIssueRepo)
-	teamRepo := new(mockTeamRepo)
 	historyRepo := new(mockIssueHistoryRepo)
 	hub := realtime.NewHub()
-	teamStatusRepo := new(mockTeamStatusRepo)
-	svc := NewIssueService(issueRepo, teamRepo, teamStatusRepo, historyRepo, hub, newTestNotifSvc())
+	statusRepo := new(mockStatusRepo)
+	svc := NewIssueService(issueRepo, statusRepo, historyRepo, hub, newTestNotifSvc(), nil, nil)
 
 	ctx := context.Background()
 	wsID := uuid.New()
 	userID := uuid.New()
 	issueID := uuid.New()
-	cycleID := uuid.New()
-	cycleIDString := cycleID.String()
+	statusID := uuid.New()
+	statusIDString := statusID.String()
 	issue := &domain.Issue{ID: issueID, WorkspaceID: wsID}
 
-	issueRepo.On("BulkUpdate", ctx, wsID, []uuid.UUID{issueID}, (*string)(nil), (*int)(nil), (*uuid.UUID)(nil), (*uuid.UUID)(nil), &cycleID, true).Return(1, nil)
+	issueRepo.On("BulkUpdate", ctx, wsID, []uuid.UUID{issueID}, (*string)(nil), (*int)(nil), (*uuid.UUID)(nil), &statusID).Return(1, nil)
 	issueRepo.On("GetByID", ctx, issueID).Return(issue, nil)
 	issueRepo.On("GetAssignees", ctx, issueID).Return([]uuid.UUID{}, nil)
 
 	updated, err := svc.BulkUpdate(ctx, wsID, userID, dto.BulkUpdateIssueRequest{
 		IssueIDs: []string{issueID.String()},
-		CycleID:  &cycleIDString,
-	})
-
-	assert.NoError(t, err)
-	assert.Equal(t, 1, updated)
-	issueRepo.AssertExpectations(t)
-}
-
-func TestIssueService_BulkUpdate_ClearsCycle(t *testing.T) {
-	issueRepo := new(mockIssueRepo)
-	teamRepo := new(mockTeamRepo)
-	historyRepo := new(mockIssueHistoryRepo)
-	hub := realtime.NewHub()
-	teamStatusRepo := new(mockTeamStatusRepo)
-	svc := NewIssueService(issueRepo, teamRepo, teamStatusRepo, historyRepo, hub, newTestNotifSvc())
-
-	ctx := context.Background()
-	wsID := uuid.New()
-	userID := uuid.New()
-	issueID := uuid.New()
-	cycleIDString := ""
-	issue := &domain.Issue{ID: issueID, WorkspaceID: wsID}
-
-	issueRepo.On("BulkUpdate", ctx, wsID, []uuid.UUID{issueID}, (*string)(nil), (*int)(nil), (*uuid.UUID)(nil), (*uuid.UUID)(nil), (*uuid.UUID)(nil), true).Return(1, nil)
-	issueRepo.On("GetByID", ctx, issueID).Return(issue, nil)
-	issueRepo.On("GetAssignees", ctx, issueID).Return([]uuid.UUID{}, nil)
-
-	updated, err := svc.BulkUpdate(ctx, wsID, userID, dto.BulkUpdateIssueRequest{
-		IssueIDs: []string{issueID.String()},
-		CycleID:  &cycleIDString,
+		StatusID: &statusIDString,
 	})
 
 	assert.NoError(t, err)
@@ -714,11 +620,10 @@ func TestIssueService_BulkUpdate_ClearsCycle(t *testing.T) {
 
 func TestIssueService_GetLabels(t *testing.T) {
 	issueRepo := new(mockIssueRepo)
-	teamRepo := new(mockTeamRepo)
 	historyRepo := new(mockIssueHistoryRepo)
 	hub := realtime.NewHub()
-	teamStatusRepo := new(mockTeamStatusRepo)
-	svc := NewIssueService(issueRepo, teamRepo, teamStatusRepo, historyRepo, hub, newTestNotifSvc())
+	statusRepo := new(mockStatusRepo)
+	svc := NewIssueService(issueRepo, statusRepo, historyRepo, hub, newTestNotifSvc(), nil, nil)
 
 	ctx := context.Background()
 	issueID := uuid.New()
@@ -737,11 +642,10 @@ func TestIssueService_GetLabels(t *testing.T) {
 
 func TestIssueService_GetHistory(t *testing.T) {
 	issueRepo := new(mockIssueRepo)
-	teamRepo := new(mockTeamRepo)
 	historyRepo := new(mockIssueHistoryRepo)
 	hub := realtime.NewHub()
-	teamStatusRepo := new(mockTeamStatusRepo)
-	svc := NewIssueService(issueRepo, teamRepo, teamStatusRepo, historyRepo, hub, newTestNotifSvc())
+	statusRepo := new(mockStatusRepo)
+	svc := NewIssueService(issueRepo, statusRepo, historyRepo, hub, newTestNotifSvc(), nil, nil)
 
 	ctx := context.Background()
 	issueID := uuid.New()

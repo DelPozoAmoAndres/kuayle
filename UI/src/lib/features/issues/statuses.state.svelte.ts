@@ -1,6 +1,6 @@
-import type { TeamStatus, StatusCategory } from '$lib/types/team-status';
-import { CATEGORY_ORDER } from '$lib/types/team-status';
-import { listTeamStatuses } from '$lib/api/team-statuses';
+import type { WorkspaceStatus, StatusCategory } from '$lib/types/status';
+import { CATEGORY_ORDER } from '$lib/types/status';
+import { listStatuses } from '$lib/api/statuses';
 
 const CATEGORY_ICONS: Record<StatusCategory, string> = {
 	backlog: 'CircleDashed',
@@ -18,10 +18,10 @@ const CATEGORY_COLORS: Record<StatusCategory, string> = {
 	cancelled: 'text-[var(--color-text-tertiary)]',
 };
 
-class TeamStatusesState {
-	statuses = $state<TeamStatus[]>([]);
+class StatusesState {
+	statuses = $state<WorkspaceStatus[]>([]);
 	loading = $state(false);
-	private loadedTeamId = '';
+	private loadedSlug = '';
 
 	/** Statuses sorted by position. */
 	statusOrder = $derived(
@@ -40,7 +40,7 @@ class TeamStatusesState {
 
 	/** Statuses grouped by category, each group sorted by position. */
 	statusesByCategory = $derived.by(() => {
-		const groups: Record<string, TeamStatus[]> = {};
+		const groups: Record<string, WorkspaceStatus[]> = {};
 		for (const cat of CATEGORY_ORDER) {
 			groups[cat] = [];
 		}
@@ -52,12 +52,14 @@ class TeamStatusesState {
 		return groups;
 	});
 
-	async load(slug: string, teamId: string) {
-		if (this.loadedTeamId === teamId && this.statuses.length > 0) return;
+	/** Load the workspace statuses (a single request per workspace). */
+	async load(workspaceSlug: string) {
+		if (!workspaceSlug) return;
+		if (this.loadedSlug === workspaceSlug && this.statuses.length > 0) return;
 		this.loading = true;
 		try {
-			this.statuses = await listTeamStatuses(slug, teamId);
-			this.loadedTeamId = teamId;
+			this.statuses = await listStatuses(workspaceSlug);
+			this.loadedSlug = workspaceSlug;
 		} catch {
 			this.statuses = [];
 		} finally {
@@ -66,13 +68,13 @@ class TeamStatusesState {
 	}
 
 	/** Force reload (e.g. after creating/deleting a status). */
-	async reload(slug: string, teamId: string) {
-		this.loadedTeamId = '';
-		await this.load(slug, teamId);
+	async reload(workspaceSlug: string) {
+		this.loadedSlug = '';
+		await this.load(workspaceSlug);
 	}
 
 	/** Get statuses visible to a specific project. If no project, returns all. */
-	statusesForProject(projectId?: string | null): TeamStatus[] {
+	statusesForProject(projectId?: string | null): WorkspaceStatus[] {
 		if (!projectId) return this.statusOrder;
 		return this.statusOrder.filter((s) => {
 			// Default statuses are always visible
@@ -84,13 +86,13 @@ class TeamStatusesState {
 	}
 
 	/** Get CSS color class for a status (uses custom color or falls back to category default). */
-	getColorClass(status: TeamStatus): string {
+	getColorClass(status: WorkspaceStatus): string {
 		if (status.color) return '';
 		return CATEGORY_COLORS[status.category] ?? CATEGORY_COLORS.backlog;
 	}
 
 	/** Get inline color style if custom color is set. */
-	getColorStyle(status: TeamStatus): string {
+	getColorStyle(status: WorkspaceStatus): string {
 		if (status.color) return `color: ${status.color}`;
 		return '';
 	}
@@ -101,14 +103,14 @@ class TeamStatusesState {
 	}
 
 	/** Find the default status for a category. */
-	defaultForCategory(category: StatusCategory): TeamStatus | undefined {
+	defaultForCategory(category: StatusCategory): WorkspaceStatus | undefined {
 		return this.statuses.find((s) => s.category === category && s.is_default);
 	}
 
 	clear() {
 		this.statuses = [];
-		this.loadedTeamId = '';
+		this.loadedSlug = '';
 	}
 }
 
-export const teamStatusesState = new TeamStatusesState();
+export const statusesState = new StatusesState();

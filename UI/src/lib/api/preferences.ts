@@ -10,14 +10,8 @@ export interface PreferencesData {
 	dark_theme: string;
 	workflow_sort_mode: string;
 	workflow_sort_order: string[];
-	team_workflow_sort_overrides: Record<string, WorkflowSortOverride>;
 	recent_due_dates: string[];
 	issues_group_by: IssuesGroupByPreference;
-}
-
-export interface WorkflowSortOverride {
-	mode: string;
-	workflow_sort_order?: string[];
 }
 
 export function getPreferences(): Promise<PreferencesData> {

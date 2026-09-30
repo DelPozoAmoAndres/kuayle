@@ -26,10 +26,10 @@ Kuayle's published releases are runnable MVPs, not a mature enterprise platform.
 
 | Area             | State                                                                                                                                                                                                                                                     |
 | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Core tracker** | Available: auth, workspaces, RBAC, teams, custom statuses, issues, multiple assignees, labels, comments, history, sub-issues, relations, triage, templates, favorites, saved views, notifications, public sharing, uploads, and WebSocket events. |
-| **Planning**     | Implemented: cycles with burndown/velocity charts, project management with Gantt view, and full cycle/project UI.                                                                                                                                         |
+| **Core tracker** | Available: auth, workspaces, RBAC, workspace-level custom statuses, issues, multiple assignees, labels, comments, history, sub-issues, relations, templates, favorites, saved views, notifications, public sharing, uploads, and WebSocket events. |
+| **Planning**     | Implemented: project management with Gantt view and a full project UI. Every issue belongs to a project.                                                                                                                                         |
 | **Integrations** | Available: workspace webhooks and a GitHub App with repository linking, branch/commit/PR activity, configurable status transitions, and WebSocket refresh events. Private networks require a webhook relay or tunnel.                                              |
-| **Analytics**    | Workspace and team overviews, event-based burn-up trends, and configurable issue insights based on current issue data and stored lifecycle timestamps.                                                                                                                                              |
+| **Analytics**    | Workspace overviews, event-based burn-up trends, and configurable issue insights based on current issue data and stored lifecycle timestamps.                                                                                                                                              |
 | **Dev Machines** | Unreleased development-branch functionality implemented as an opt-in self-hosted subsystem: PostgreSQL control plane, multi-container runtime, manager, authenticated gateway, four agent providers, collector, and UI. Disabled by default; see [`TECHNICAL.md`](TECHNICAL.md). |
 | **Self-hosting** | Reference Docker Compose stack with Caddy, PostgreSQL, Redis, backend, frontend, an update script, and dedicated config in [`selfhosting/`](selfhosting/).                                                                                                       |
 
@@ -45,26 +45,24 @@ The distribution model is deliberately simple:
 - no per-user software fee;
 - infrastructure, backups, monitoring, and updates remain the operator's responsibility.
 
-The product is intentionally smaller than broad project-management suites. It covers issues, cycles, projects, saved views, analytics, GitHub automation, public sharing, real-time events, and portable per-workspace transfer. It does not currently include enterprise identity, a wiki, or modules.
+The product is intentionally smaller than broad project-management suites. It covers issues, projects, saved views, analytics, GitHub automation, public sharing, real-time events, and portable per-workspace transfer. It does not currently include enterprise identity, a wiki, or modules.
 
 ## ✨ Features
 
 |     | Feature                | Description                                                                      |
 | --- | ---------------------- | -------------------------------------------------------------------------------- |
 | 🏢  | **Workspaces**         | Multi-tenant with role-based access (owner, admin, member, guest)                |
-| 👥  | **Teams**              | Custom workflows, each team gets its own statuses and triage settings            |
 | 📋  | **Issues**             | Priority, due dates, sub-issues, multi-assignee, labels, comments, audit history |
 | 🔗  | **Issue Relations**    | Blocking/blocked, duplicate, and related issue links                             |
-| 🔄  | **Cycles**             | Sprint planning with burndown/velocity charts and time-boxed iterations          |
-| 📁  | **Projects**           | Cross-team work grouped under a single umbrella with Gantt view                  |
+| 📁  | **Projects**           | Issues grouped under a project with Gantt view                                   |
 | 🏷️  | **Labels**             | Hierarchical, workspace-scoped, with soft delete and default labels on creation  |
-| 👁️  | **Views**              | Saved views with personal/workspace/team scoping, drag-and-drop reorder          |
+| 👁️  | **Views**              | Saved views with personal/workspace scoping, drag-and-drop reorder               |
 | 🔔  | **Notifications**      | Inbox with snooze, read status, and archive                                      |
 | 🔗  | **Webhooks**           | Plug into external services and integrations                                     |
-| ⚡  | **Real-time**          | Workspace WebSocket events for issues, comments, cycles, views, GitHub, and presence |
+| ⚡  | **Real-time**          | Workspace WebSocket events for issues, comments, views, GitHub, and presence     |
 | 🖥️  | **Dev Machines**       | Unreleased opt-in multi-container coding environments with agents, browser access, authenticated routing, and work tracking |
 | 🐙  | **GitHub**             | Link repos, match issue IDs in development activity, and apply status rules      |
-| 📊  | **Analytics**          | Workspace/team overview, burn-up, and configurable insights                     |
+| 📊  | **Analytics**          | Workspace overview, burn-up, and configurable insights                          |
 | 🔗  | **Public Sharing**     | Token-based read-only links for issues and views                                 |
 | 📦  | **Asset Management**   | File uploads, signed URLs for prompt images, S3-compatible storage               |
 | 💾  | **Workspace Transfer** | Owner/admin export and new-instance import with assets and ID remapping           |
@@ -96,7 +94,7 @@ The implementation:
 2. **Support multiple agent providers** — Claude Code, OpenCode, Codex, or admin-configured generic CLIs. The shared developer image includes pinned OpenCode, Claude Code, and Codex CLIs for direct interactive terminal use. Kuayle's dashboard launches bounded autonomous runs in separately pinned provider images and normalizes their results.
 3. **Assign random subdomains** through a separate registrable wildcard domain (`*.kuayle-machines.example.net`) with launch-ticket auth and host-restricted machine session cookies. The machine domain must be a completely separate registrable domain to prevent cookie leakage between the main application and machine workloads.
 4. **Authenticate** through a dedicated unprivileged Machine Gateway; the privileged Machine Manager is the only Dev Machines runtime component with Docker socket access. The separately optional system updater also mounts the socket when enabled.
-5. **Prepare issue worktrees** from issue, project, team, then workspace repository/environment defaults. One machine has affinity to one repository and can hold several independent issue worktrees from that repository; use a separate machine for another repository/environment or concurrent conflicting work.
+5. **Prepare issue worktrees** from issue, project, then workspace repository/environment defaults. One machine has affinity to one repository and can hold several independent issue worktrees from that repository; use a separate machine for another repository/environment or concurrent conflicting work.
 6. **Record best-effort activity** from filesystem, shell, root-checkout Git, browser, agent, gateway, and lifecycle telemetry and attach it to project work
 
 ### Modes
@@ -108,7 +106,7 @@ The implementation:
 
 ### Configuration
 
-Machines are created without requiring a repository, branch, issue, project, or manual TTL. Friendly random names are case-insensitively unique per creator within a workspace and have an availability API. Opening an issue resolves its repository and environment using issue, project, team, then workspace defaults and creates an isolated Git worktree. Workspace policies control concurrency, maximum hard runtime, a default 240-minute idle pause, per-machine disk size, providers, repositories, and custom CLI access. A per-machine **Keep running** switch bypasses idle pause; no automatic deletion is performed. Owners and admins can create a writable Environment Builder, pause or stop it, and save selected tooling/home customization as an immutable local OCI Development Environment image.
+Machines are created without requiring a repository, branch, issue, project, or manual TTL. Friendly random names are case-insensitively unique per creator within a workspace and have an availability API. Opening an issue resolves its repository and environment using issue, project, then workspace defaults and creates an isolated Git worktree. Workspace policies control concurrency, maximum hard runtime, a default 240-minute idle pause, per-machine disk size, providers, repositories, and custom CLI access. A per-machine **Keep running** switch bypasses idle pause; no automatic deletion is performed. Owners and admins can create a writable Environment Builder, pause or stop it, and save selected tooling/home customization as an immutable local OCI Development Environment image.
 
 | Size   | CPU     | Memory | PID basis | Disk (hard quota) |
 | ------ | ------- | ------ | --------- | ----------------- |
@@ -197,7 +195,7 @@ Kuayle is designed to be self-hosted. The reference stack in [`selfhosting/`](se
 
 Workspace owners and admins can download a versioned `.kuayle.zip` archive from **Settings → General → Workspace transfer**. An authenticated user with no workspace can choose **Import workspace** during workspace setup; an owner or admin can also start an import from the transfer settings. Import always creates a separate workspace and never overwrites an existing one.
 
-The archive contains a logical `manifest.json`, `data.json`, and the workspace's uploaded asset bytes. It preserves teams, statuses, labels, projects, cycles, issues and their relationships/history, templates, views, favorites, shared links, workspace notifications, integration metadata, AI prompts, and safe Dev Machine workspace policy/scope settings. Database and asset IDs are regenerated and references—including protected asset URLs—are remapped during import.
+The archive contains a logical `manifest.json`, `data.json`, and the workspace's uploaded asset bytes. It preserves statuses, labels, projects, issues and their relationships/history, templates, views, favorites, shared links, workspace notifications, integration metadata, AI prompts, and safe Dev Machine workspace policy/scope settings. Database and asset IDs are regenerated and references—including protected asset URLs—are remapped during import.
 
 Workspace transfer deliberately excludes password hashes, refresh tokens, personal preferences, webhook secrets, GitHub App credentials and access tokens, AI API keys, Dev Machine credentials, active machines, Docker volumes/networks, environment images, logs, sessions, and runtime artifacts. Imported webhooks, shared links, GitHub repositories/automation, and Dev Machine policy are disabled or rotated where appropriate; GitHub, AI, webhooks, and Development Environments must be reconfigured on the target instance.
 

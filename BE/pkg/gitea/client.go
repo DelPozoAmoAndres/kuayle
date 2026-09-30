@@ -201,6 +201,61 @@ func (c *Client) ReopenIssue(owner, repo string, issueIndex int) (*Issue, error)
 	return c.EditIssue(owner, repo, issueIndex, "", "", "open")
 }
 
+// CreateIssueComment adds a comment to an issue.
+func (c *Client) CreateIssueComment(owner, repo string, issueIndex int, body string) (*GiteaComment, error) {
+	payload, err := json.Marshal(map[string]any{
+		"body": body,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var comment GiteaComment
+	if err := c.doPost(fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d/comments", owner, repo, issueIndex), payload, &comment); err != nil {
+		return nil, err
+	}
+	return &comment, nil
+}
+
+// EditIssueComment updates the body of an existing issue comment.
+func (c *Client) EditIssueComment(owner, repo string, commentID int64, body string) error {
+	payload, err := json.Marshal(map[string]any{
+		"body": body,
+	})
+	if err != nil {
+		return err
+	}
+	var comment GiteaComment
+	return c.doPatch(fmt.Sprintf("/api/v1/repos/%s/%s/issues/comments/%d", owner, repo, commentID), payload, &comment)
+}
+
+// DeleteIssueComment removes an existing issue comment.
+func (c *Client) DeleteIssueComment(owner, repo string, commentID int64) error {
+	return c.doDelete(fmt.Sprintf("/api/v1/repos/%s/%s/issues/comments/%d", owner, repo, commentID))
+}
+
+// doDelete is a helper for authenticated DELETE requests.
+func (c *Client) doDelete(urlPath string) error {
+	fullURL := c.baseURL + urlPath
+	req, err := http.NewRequest("DELETE", fullURL, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "token "+c.token)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("Gitea API error %d: %s", resp.StatusCode, body)
+	}
+	return nil
+}
+
 // doPatch is a helper for authenticated PATCH requests.
 func (c *Client) doPatch(urlPath string, payload []byte, result interface{}) error {
 	fullURL := c.baseURL + urlPath
@@ -301,4 +356,14 @@ type Issue struct {
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
 	ClosedAt  *time.Time `json:"closed_at"`
+}
+
+// GiteaComment represents a comment on a Gitea issue.
+type GiteaComment struct {
+	ID        int64      `json:"id"`
+	Body      string     `json:"body"`
+	User      *GiteaUser `json:"user"`
+	HTMLURL   string     `json:"html_url"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }

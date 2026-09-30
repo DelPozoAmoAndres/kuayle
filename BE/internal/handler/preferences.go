@@ -55,24 +55,15 @@ func (h *PreferencesHandler) Update(c echo.Context) error {
 }
 
 func toPreferencesResponse(prefs *domain.UserPreferences) dto.UserPreferencesResponse {
-	overrides := make(map[string]dto.WorkflowSortOverride, len(prefs.TeamWorkflowSortOverrides))
-	for key, override := range prefs.TeamWorkflowSortOverrides {
-		overrides[key] = dto.WorkflowSortOverride{
-			Mode:              override.Mode,
-			WorkflowSortOrder: []string(override.WorkflowSortOrder),
-		}
-	}
-
 	return dto.UserPreferencesResponse{
-		FontSize:                  prefs.FontSize,
-		PointerCursors:            prefs.PointerCursors,
-		ThemeMode:                 prefs.ThemeMode,
-		LightTheme:                prefs.LightTheme,
-		DarkTheme:                 prefs.DarkTheme,
-		WorkflowSortMode:          prefs.WorkflowSortMode,
-		WorkflowSortOrder:         []string(prefs.WorkflowSortOrder),
-		TeamWorkflowSortOverrides: overrides,
-		RecentDueDates:            []string(prefs.RecentDueDates),
-		IssuesGroupBy:             prefs.IssuesGroupBy,
+		FontSize:          prefs.FontSize,
+		PointerCursors:    prefs.PointerCursors,
+		ThemeMode:         prefs.ThemeMode,
+		LightTheme:        prefs.LightTheme,
+		DarkTheme:         prefs.DarkTheme,
+		WorkflowSortMode:  prefs.WorkflowSortMode,
+		WorkflowSortOrder: []string(prefs.WorkflowSortOrder),
+		RecentDueDates:    []string(prefs.RecentDueDates),
+		IssuesGroupBy:     prefs.IssuesGroupBy,
 	}
 }

@@ -56,7 +56,6 @@ func main() {
 	userRepo := repository.NewUserRepository(db)
 	refreshRepo := repository.NewRefreshTokenRepository(db)
 	workspaceRepo := repository.NewWorkspaceRepository(db)
-	teamRepo := repository.NewTeamRepository(db)
 	issueRepo := repository.NewIssueRepository(db)
 	labelRepo := repository.NewLabelRepository(db)
 	commentRepo := repository.NewCommentRepository(db)
@@ -66,8 +65,7 @@ func main() {
 	relationRepo := repository.NewIssueRelationRepository(db)
 	templateRepo := repository.NewIssueTemplateRepository(db)
 	viewRepo := repository.NewViewRepository(db)
-	cycleRepo := repository.NewCycleRepository(db)
-	teamStatusRepo := repository.NewTeamStatusRepository(db)
+	statusRepo := repository.NewStatusRepository(db)
 	visibilityRepo := repository.NewProjectStatusVisibilityRepository(db)
 	favRepo := repository.NewFavoriteRepository(db)
 	prefsRepo := repository.NewUserPreferencesRepository(db)
@@ -79,18 +77,16 @@ func main() {
 
 	// Services
 	authSvc := service.NewAuthService(userRepo, refreshRepo, cfg.JWTSecret)
-	workspaceSvc := service.NewWorkspaceService(workspaceRepo, userRepo)
-	teamSvc := service.NewTeamService(teamRepo, teamStatusRepo)
+	workspaceSvc := service.NewWorkspaceService(workspaceRepo, userRepo, statusRepo)
 	notifSvc := service.NewNotificationService(notifRepo)
-	issueSvc := service.NewIssueService(issueRepo, teamRepo, teamStatusRepo, historyRepo, hub, notifSvc, projectRepo)
+	issueSvc := service.NewIssueService(issueRepo, statusRepo, historyRepo, hub, notifSvc, projectRepo, workspaceRepo)
 	labelSvc := service.NewLabelService(labelRepo)
-	commentSvc := service.NewCommentService(commentRepo, issueRepo, hub, notifSvc)
+	commentSvc := service.NewCommentService(commentRepo, issueRepo, userRepo, hub, notifSvc)
 	projectSvc := service.NewProjectService(projectRepo)
 	relationSvc := service.NewIssueRelationService(relationRepo, issueRepo)
 	templateSvc := service.NewIssueTemplateService(templateRepo)
 	viewSvc := service.NewViewService(viewRepo, hub)
-	cycleSvc := service.NewCycleService(cycleRepo, teamRepo, hub, notifSvc)
-	teamStatusSvc := service.NewTeamStatusService(teamStatusRepo, visibilityRepo)
+	statusSvc := service.NewStatusService(statusRepo, visibilityRepo)
 	favSvc := service.NewFavoriteService(favRepo)
 	prefsSvc := service.NewPreferencesService(prefsRepo)
 	aiSettingsSvc := service.NewAISettingsService(aiSettingsRepo, workspaceRepo, issueRepo, crypto.DeriveKey(cfg.JWTSecret+":ai"))
@@ -122,8 +118,7 @@ func main() {
 	loginThrottle := mw.NewLoginThrottle(5, 15*time.Minute)
 	authH := handler.NewAuthHandler(authSvc, cfg.Environment != "development", loginThrottle, cfg.IsSysAdmin)
 	workspaceH := handler.NewWorkspaceHandler(workspaceSvc)
-	teamH := handler.NewTeamHandler(teamSvc)
-	issueH := handler.NewIssueHandler(issueSvc, commentSvc, userRepo, teamStatusRepo, projectRepo, cycleRepo, relationSvc)
+	issueH := handler.NewIssueHandler(issueSvc, commentSvc, userRepo, statusRepo, projectRepo, relationSvc)
 	labelH := handler.NewLabelHandler(labelSvc)
 	projectH := handler.NewProjectHandler(projectSvc)
 	notifH := handler.NewNotificationHandler(notifSvc)
@@ -131,8 +126,7 @@ func main() {
 	relationH := handler.NewIssueRelationHandler(relationSvc)
 	templateH := handler.NewIssueTemplateHandler(templateSvc)
 	viewH := handler.NewViewHandler(viewSvc)
-	cycleH := handler.NewCycleHandler(cycleSvc)
-	teamStatusH := handler.NewTeamStatusHandler(teamStatusSvc)
+	statusH := handler.NewStatusHandler(statusSvc)
 	favH := handler.NewFavoriteHandler(favSvc)
 	prefsH := handler.NewPreferencesHandler(prefsSvc)
 	aiSettingsH := handler.NewAISettingsHandler(aiSettingsSvc)
@@ -144,7 +138,7 @@ func main() {
 	webhookSvc := service.NewWebhookService(webhookRepo, cfg.JWTSecret)
 	webhookH := handler.NewWebhookHandler(webhookSvc)
 	sharedLinkRepo := repository.NewSharedLinkRepository(db)
-	sharedLinkSvc := service.NewSharedLinkService(sharedLinkRepo, workspaceRepo, teamRepo, projectRepo, viewRepo, issueRepo, userRepo, teamStatusRepo, cfg.JWTSecret)
+	sharedLinkSvc := service.NewSharedLinkService(sharedLinkRepo, workspaceRepo, projectRepo, viewRepo, issueRepo, userRepo, statusRepo, cfg.JWTSecret)
 	sharedLinkH := handler.NewSharedLinkHandler(sharedLinkSvc, cfg.FrontendURL)
 	store, err := storage.New(cfg.Storage)
 	if err != nil {
@@ -170,7 +164,7 @@ func main() {
 	}
 	githubRepo := repository.NewGitHubRepository(db)
 	githubSvc := service.NewGitHubService(
-		githubRepo, issueRepo, teamRepo, teamStatusRepo, historyRepo,
+		githubRepo, issueRepo, statusRepo, historyRepo,
 		crypto.DeriveKey(cfg.JWTSecret+":github"), hub, cfg.FrontendURL, cfg.GitHubWebhookURL,
 		globalGitHubApp,
 	)
@@ -179,13 +173,17 @@ func main() {
 	// Gitea integration
 	giteaRepo := repository.NewGiteaRepository(db)
 	giteaSvc := service.NewGiteaService(
-		giteaRepo, issueRepo, teamRepo, teamStatusRepo, historyRepo, projectRepo,
+		giteaRepo, issueRepo, statusRepo, historyRepo, projectRepo,
+		userRepo, commentRepo,
 		crypto.DeriveKey(cfg.JWTSecret+":gitea"), hub, cfg.FrontendURL,
 	)
 	giteaH := handler.NewGiteaHandler(giteaSvc)
 
-	// Wire Gitea sync into IssueService (avoids circular init by using setter)
+	// Wire Gitea sync into IssueService/CommentService and the comment service
+	// into GiteaService (avoids circular init by using setters)
 	issueSvc.SetGiteaService(giteaSvc)
+	commentSvc.SetGiteaService(giteaSvc)
+	giteaSvc.SetCommentService(commentSvc)
 
 	// Background: clean up expired refresh tokens every hour
 	go func() {
@@ -255,29 +253,11 @@ func main() {
 	ws.PATCH("/members/:userId", workspaceH.UpdateMemberRole, mw.RequirePermission("member:invite"))
 	ws.DELETE("/members/:userId", workspaceH.RemoveMember, mw.RequirePermission("member:invite"))
 
-	// Teams
-	ws.GET("/teams", teamH.List)
-	ws.POST("/teams", teamH.Create, mw.RequirePermission("team:manage"))
-	ws.GET("/teams/:teamId", teamH.Get)
-	ws.PATCH("/teams/:teamId", teamH.Update, mw.RequirePermission("team:manage"))
-	ws.DELETE("/teams/:teamId", teamH.Delete, mw.RequirePermission("team:manage"))
-	ws.POST("/teams/:teamId/leave", teamH.Leave)
-
-	// Team Statuses
-	ws.GET("/teams/:teamId/statuses", teamStatusH.List)
-	ws.POST("/teams/:teamId/statuses", teamStatusH.Create, mw.RequirePermission("team:manage"))
-	ws.PATCH("/teams/:teamId/statuses/:statusId", teamStatusH.Update, mw.RequirePermission("team:manage"))
-	ws.DELETE("/teams/:teamId/statuses/:statusId", teamStatusH.Delete, mw.RequirePermission("team:manage"))
-
-	// Cycles (team-scoped)
-	ws.GET("/teams/:teamId/cycles", cycleH.List)
-	ws.POST("/teams/:teamId/cycles", cycleH.Create)
-	ws.GET("/teams/:teamId/cycles/velocity", cycleH.Velocity)
-	ws.GET("/teams/:teamId/cycles/:cycleId", cycleH.Get)
-	ws.PATCH("/teams/:teamId/cycles/:cycleId", cycleH.Update)
-	ws.POST("/teams/:teamId/cycles/:cycleId/complete", cycleH.Complete)
-	ws.GET("/teams/:teamId/cycles/:cycleId/burndown", cycleH.Burndown)
-	ws.DELETE("/teams/:teamId/cycles/:cycleId", cycleH.Delete)
+	// Statuses (workspace-scoped)
+	ws.GET("/statuses", statusH.List)
+	ws.POST("/statuses", statusH.Create, mw.RequirePermission("workspace:manage"))
+	ws.PATCH("/statuses/:statusId", statusH.Update, mw.RequirePermission("workspace:manage"))
+	ws.DELETE("/statuses/:statusId", statusH.Delete, mw.RequirePermission("workspace:manage"))
 
 	// Issues
 	ws.GET("/issues", issueH.List)
@@ -327,7 +307,6 @@ func main() {
 	ws.GET("/projects/:id", projectH.Get)
 	ws.PATCH("/projects/:id", projectH.Update, mw.RequirePermission("project:manage"))
 	ws.DELETE("/projects/:id", projectH.Delete, mw.RequirePermission("project:manage"))
-	ws.GET("/teams/:teamId/projects", projectH.ListByTeam)
 
 	// Views
 	ws.GET("/views", viewH.List)
@@ -367,9 +346,9 @@ func main() {
 	ws.GET("/github/callback", githubH.Callback, mw.RequirePermission("workspace:manage"))
 	ws.DELETE("/github/disconnect", githubH.Disconnect, mw.RequirePermission("workspace:manage"))
 	ws.DELETE("/github/app", githubH.DeleteApp, mw.RequirePermission("workspace:manage"))
-	ws.GET("/github/repos", githubH.ListRepos, mw.RequirePermission("workspace:manage"))
-	ws.POST("/github/repos", githubH.LinkRepos, mw.RequirePermission("workspace:manage"))
-	ws.DELETE("/github/repos/:id", githubH.UnlinkRepo, mw.RequirePermission("workspace:manage"))
+	ws.GET("/github/repos", githubH.ListRepos, mw.RequirePermission("project:manage"))
+	ws.POST("/github/repos", githubH.LinkRepos, mw.RequirePermission("project:manage"))
+	ws.DELETE("/github/repos/:id", githubH.UnlinkRepo, mw.RequirePermission("project:manage"))
 	ws.GET("/github/auto-transitions", githubH.ListAutoTransitions)
 	ws.PATCH("/github/auto-transitions", githubH.UpdateAutoTransitions, mw.RequirePermission("workspace:manage"))
 	ws.GET("/issues/:identifier/github", githubH.IssueGitHubActivity)
@@ -382,9 +361,9 @@ func main() {
 	ws.GET("/gitea/status", giteaH.Status)
 	ws.POST("/gitea/connect", giteaH.Connect, mw.RequirePermission("workspace:manage"))
 	ws.DELETE("/gitea/disconnect", giteaH.Disconnect, mw.RequirePermission("workspace:manage"))
-	ws.GET("/gitea/repos", giteaH.ListRepos, mw.RequirePermission("workspace:manage"))
-	ws.POST("/gitea/repos", giteaH.LinkRepos, mw.RequirePermission("workspace:manage"))
-	ws.DELETE("/gitea/repos/:id", giteaH.UnlinkRepo, mw.RequirePermission("workspace:manage"))
+	ws.GET("/gitea/repos", giteaH.ListRepos, mw.RequirePermission("project:manage"))
+	ws.POST("/gitea/repos", giteaH.LinkRepos, mw.RequirePermission("project:manage"))
+	ws.DELETE("/gitea/repos/:id", giteaH.UnlinkRepo, mw.RequirePermission("project:manage"))
 	ws.GET("/gitea/auto-transitions", giteaH.ListAutoTransitions)
 	ws.PATCH("/gitea/auto-transitions", giteaH.UpdateAutoTransitions, mw.RequirePermission("workspace:manage"))
 	ws.GET("/issues/:identifier/gitea", giteaH.IssueGiteaActivity)

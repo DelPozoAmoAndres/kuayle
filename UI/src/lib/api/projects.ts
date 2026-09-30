@@ -6,17 +6,13 @@ export function listProjects(slug: string): Promise<Project[]> {
 	return api.get<Project[]>(`/api/workspaces/${slug}/projects`);
 }
 
-export function listTeamProjects(slug: string, teamId: string): Promise<Project[]> {
-	return api.get<Project[]>(`/api/workspaces/${slug}/teams/${teamId}/projects`);
-}
-
 export function getProject(slug: string, id: string): Promise<Project> {
 	return api.get<Project>(`/api/workspaces/${slug}/projects/${id}`);
 }
 
 export async function createProject(
 	slug: string,
-	data: { name: string; description?: string; team_id?: string }
+	data: { name: string; description?: string }
 ): Promise<Project> {
 	const project = await api.post<Project>(`/api/workspaces/${slug}/projects`, data);
 	emitAppRefresh(['projects'], slug);
@@ -26,7 +22,7 @@ export async function createProject(
 export async function updateProject(
 	slug: string,
 	id: string,
-	data: { name?: string; description?: string; status?: string; team_id?: string | null }
+	data: { name?: string; description?: string; status?: string }
 ): Promise<Project> {
 	const project = await api.patch<Project>(`/api/workspaces/${slug}/projects/${id}`, data);
 	emitAppRefresh(['projects'], slug);

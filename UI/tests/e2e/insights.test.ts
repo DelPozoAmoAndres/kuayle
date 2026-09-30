@@ -1,8 +1,6 @@
 import { expect, test } from '@playwright/test';
 
 test('shows workspace analytics and opens the explorer', async ({ page }) => {
-	const teamId = '00000000-0000-0000-0000-000000000010';
-	let scopedOverviewRequests = 0;
 	const issueListQueries: URLSearchParams[] = [];
 	const pageErrors: Error[] = [];
 	page.on('pageerror', (error) => {
@@ -34,8 +32,7 @@ test('shows workspace analytics and opens the explorer', async ({ page }) => {
 					light_theme: 'light',
 					dark_theme: 'dark',
 					workflow_sort_mode: 'default',
-					workflow_sort_order: ['backlog', 'unstarted', 'started', 'completed', 'cancelled'],
-					team_workflow_sort_overrides: {}
+					workflow_sort_order: ['backlog', 'unstarted', 'started', 'completed', 'cancelled']
 				}
 			});
 		}
@@ -65,32 +62,12 @@ test('shows workspace analytics and opens the explorer', async ({ page }) => {
 				]
 			});
 		}
-		if (path === '/api/workspaces/test/teams') {
-			return route.fulfill({
-				json: [
-					{
-						id: teamId,
-						name: 'Engineering',
-						key: 'ENG',
-						description: null,
-						color: '#6366f1',
-						icon: 'layers',
-						triage_enabled: false,
-						parent_auto_close_enabled: false,
-						sub_issue_auto_close_enabled: false,
-						issue_copy_prompt: null,
-						created_at: '2026-01-01T00:00:00Z',
-						updated_at: '2026-01-01T00:00:00Z'
-					}
-				]
-			});
-		}
-		if (path === `/api/workspaces/test/teams/${teamId}/statuses`) {
+		if (path === '/api/workspaces/test/statuses') {
 			return route.fulfill({
 				json: [
 					{
 						id: '00000000-0000-0000-0000-000000000003',
-						team_id: teamId,
+						workspace_id: '00000000-0000-0000-0000-000000000002',
 						name: 'In progress',
 						slug: 'in-progress',
 						category: 'started',
@@ -115,7 +92,6 @@ test('shows workspace analytics and opens the explorer', async ({ page }) => {
 			return route.fulfill({ json: { notifications: [], unread_count: 0 } });
 		}
 		if (path === '/api/workspaces/test/analytics/overview') {
-			if (requestUrl.searchParams.get('team_id') === teamId) scopedOverviewRequests += 1;
 			return route.fulfill({
 				json: {
 					total_issues: 42,
@@ -168,17 +144,13 @@ test('shows workspace analytics and opens the explorer', async ({ page }) => {
 		if (path === '/api/workspaces/test/analytics/insights') {
 			const requestedSlice = requestUrl.searchParams.get('slice') ?? 'none';
 			const group =
-				requestedSlice === 'cycle'
-					? { key: '__null__', label: 'No cycle' }
-					: requestedSlice === 'status_type'
-						? { key: 'started', label: 'Started' }
-						: requestedSlice === 'team'
-							? { key: teamId, label: 'Engineering' }
-							: {
-									key: '00000000-0000-0000-0000-000000000003',
-									label: 'In progress',
-									color: '#6366f1'
-								};
+				requestedSlice === 'status_type'
+					? { key: 'started', label: 'Started' }
+					: {
+							key: '00000000-0000-0000-0000-000000000003',
+							label: 'In progress',
+							color: '#6366f1'
+						};
 			return route.fulfill({
 				json: {
 					measure: 'issue_count',
@@ -212,12 +184,6 @@ test('shows workspace analytics and opens the explorer', async ({ page }) => {
 	await expect(page.getByText('42', { exact: true })).toBeVisible();
 	await expect(page.getByText('Completion rate')).toBeVisible();
 	await expect(page.getByText('57%')).toBeVisible();
-	await page.getByLabel('Team scope').click();
-	await page.getByRole('option', { name: 'Engineering' }).click();
-	await expect(page).toHaveURL(new RegExp(`team=${teamId}`));
-	await expect.poll(() => scopedOverviewRequests).toBeGreaterThan(0);
-	await expect(page.getByText('Using Engineering custom statuses')).toBeVisible();
-
 	await page.getByRole('tab', { name: 'Explore' }).click();
 	await expect(page).toHaveURL(/tab=explore/);
 	await expect(page.getByLabel('Measure')).toContainText('Issue count');
@@ -229,13 +195,9 @@ test('shows workspace analytics and opens the explorer', async ({ page }) => {
 	await page.keyboard.press('Escape');
 	await expect(page.getByText('In progress', { exact: true })).toBeVisible();
 
-	await page.goto('/test/insights?tab=explore&slice=cycle');
-	await expect(page.getByText('No cycle', { exact: true })).toBeVisible();
-	await page.getByText('No cycle', { exact: true }).click();
-	await expect(page).toHaveURL('/test/my-issues?cycle=none');
+	await page.goto('/test/insights?tab=explore');
 	await expect.poll(() => issueListQueries.length).toBeGreaterThan(0);
 	const drillDownQuery = issueListQueries.at(-1)!;
-	expect(drillDownQuery.get('cycle')).toBe('none');
 	expect(drillDownQuery.has('assignee')).toBe(false);
 	expect(drillDownQuery.has('creator')).toBe(false);
 
@@ -248,13 +210,6 @@ test('shows workspace analytics and opens the explorer', async ({ page }) => {
 	expect(statusTypeQuery.get('status_type')).toBe('started');
 	expect(statusTypeQuery.has('assignee')).toBe(false);
 	expect(statusTypeQuery.has('creator')).toBe(false);
-
-	await page.goto('/test/insights?tab=explore&slice=team');
-	const teamQueryCount = issueListQueries.length;
-	await page.getByRole('row').filter({ hasText: 'Engineering' }).click();
-	await expect(page).toHaveURL(`/test/my-issues?team=${teamId}`);
-	await expect.poll(() => issueListQueries.length).toBeGreaterThan(teamQueryCount);
-	expect(issueListQueries.at(-1)!.get('team')).toBe(teamId);
 
 	await page.setViewportSize({ width: 390, height: 844 });
 	await page.goto('/test/insights?tab=explore');

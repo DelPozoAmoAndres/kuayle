@@ -75,7 +75,7 @@ test('previews, confirms, and imports a workspace archive', async ({ page }) => 
 		}
 		if (path === '/api/workspaces/restored') return route.fulfill({ json: workspace('restored') });
 		if (path === '/api/notifications') return route.fulfill({ json: { notifications: [], unread_count: 0 } });
-		if (/\/api\/workspaces\/restored\/(teams|projects|labels|members|views|favorites)$/.test(path)) {
+		if (/\/api\/workspaces\/restored\/(statuses|projects|labels|members|views|favorites)$/.test(path)) {
 			return route.fulfill({ json: [] });
 		}
 		return route.fulfill({ status: 404, json: { error: { code: 'UNHANDLED', message: path } } });
@@ -168,7 +168,7 @@ test('shows export to workspace admins and downloads the archive', async ({ page
 			});
 		}
 		if (path === '/api/notifications') return route.fulfill({ json: { notifications: [], unread_count: 0 } });
-		if (/\/api\/workspaces\/test\/(teams|projects|labels|members|views|favorites)$/.test(path)) {
+		if (/\/api\/workspaces\/test\/(statuses|projects|labels|members|views|favorites)$/.test(path)) {
 			return route.fulfill({ json: [] });
 		}
 		return route.fulfill({ status: 404, json: { error: { code: 'UNHANDLED', message: path } } });

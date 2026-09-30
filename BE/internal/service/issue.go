@@ -17,14 +17,14 @@ import (
 )
 
 type IssueService struct {
-	issueRepo      repository.IssueRepo
-	teamRepo       repository.TeamRepo
-	projectRepo    repository.ProjectRepo
-	teamStatusRepo repository.TeamStatusRepo
-	historyRepo    repository.IssueHistoryRepo
-	hub            *realtime.Hub
-	notifSvc       *NotificationService
-	giteaSvc       *GiteaService
+	issueRepo     repository.IssueRepo
+	workspaceRepo repository.WorkspaceRepo
+	projectRepo   repository.ProjectRepo
+	statusRepo    repository.StatusRepo
+	historyRepo   repository.IssueHistoryRepo
+	hub           *realtime.Hub
+	notifSvc      *NotificationService
+	giteaSvc      *GiteaService
 }
 
 const issueUpdateNotificationWindow = 5 * time.Minute
@@ -60,12 +60,16 @@ type issueSubscriberRepo interface {
 	GetSubscribedIssueIDs(ctx context.Context, issueIDs []uuid.UUID, userID uuid.UUID) (map[uuid.UUID]bool, error)
 }
 
-func NewIssueService(issueRepo repository.IssueRepo, teamRepo repository.TeamRepo, teamStatusRepo repository.TeamStatusRepo, historyRepo repository.IssueHistoryRepo, hub *realtime.Hub, notifSvc *NotificationService, projectRepo ...repository.ProjectRepo) *IssueService {
-	svc := &IssueService{issueRepo: issueRepo, teamRepo: teamRepo, teamStatusRepo: teamStatusRepo, historyRepo: historyRepo, hub: hub, notifSvc: notifSvc}
-	if len(projectRepo) > 0 {
-		svc.projectRepo = projectRepo[0]
+func NewIssueService(issueRepo repository.IssueRepo, statusRepo repository.StatusRepo, historyRepo repository.IssueHistoryRepo, hub *realtime.Hub, notifSvc *NotificationService, projectRepo repository.ProjectRepo, workspaceRepo repository.WorkspaceRepo) *IssueService {
+	return &IssueService{
+		issueRepo:     issueRepo,
+		workspaceRepo: workspaceRepo,
+		projectRepo:   projectRepo,
+		statusRepo:    statusRepo,
+		historyRepo:   historyRepo,
+		hub:           hub,
+		notifSvc:      notifSvc,
 	}
-	return svc
 }
 
 // SetGiteaService sets the GiteaService dependency for issue-to-Gitea syncing.
@@ -74,21 +78,49 @@ func (s *IssueService) SetGiteaService(giteaSvc *GiteaService) {
 }
 
 func (s *IssueService) Create(ctx context.Context, workspaceID, creatorID uuid.UUID, req dto.CreateIssueRequest) (*domain.Issue, error) {
-	var teamID *uuid.UUID
-	var team *domain.Team
+	if s.projectRepo == nil {
+		return nil, fmt.Errorf("project repository unavailable")
+	}
 
-	if req.TeamID != nil && *req.TeamID != "" {
-		tid, err := uuid.Parse(*req.TeamID)
+	// Resolve the parent first: sub-issues inherit the project when omitted.
+	var parent *domain.Issue
+	var parentID *uuid.UUID
+	if req.ParentID != nil {
+		var err error
+		parentID, parent, err = s.validateParentID(ctx, workspaceID, uuid.Nil, *req.ParentID)
 		if err != nil {
-			return nil, fmt.Errorf("invalid team_id")
-		}
-		teamID = &tid
-
-		team, err = s.teamRepo.GetByID(ctx, *teamID)
-		if err != nil || team == nil {
-			return nil, fmt.Errorf("team not found")
+			return nil, err
 		}
 	}
+
+	// Every issue must belong to a project.
+	var project *domain.Project
+	if req.ProjectID != nil && *req.ProjectID != "" {
+		pid, err := uuid.Parse(*req.ProjectID)
+		if err != nil {
+			return nil, fmt.Errorf("invalid project_id")
+		}
+		project, err = s.projectRepo.GetByID(ctx, pid)
+		if err != nil {
+			return nil, err
+		}
+		if project == nil || project.WorkspaceID != workspaceID {
+			return nil, fmt.Errorf("project not found")
+		}
+	} else if parent != nil && parent.ProjectID != nil {
+		inherited, err := s.projectRepo.GetByID(ctx, *parent.ProjectID)
+		if err != nil {
+			return nil, err
+		}
+		if inherited != nil && inherited.WorkspaceID == workspaceID {
+			project = inherited
+		}
+	}
+	if project == nil {
+		return nil, fmt.Errorf("project is required")
+	}
+
+	prefix := projectPrefix(project.Name)
 
 	tx, err := s.issueRepo.BeginTx(ctx)
 	if err != nil {
@@ -96,17 +128,11 @@ func (s *IssueService) Create(ctx context.Context, workspaceID, creatorID uuid.U
 	}
 	defer tx.Rollback()
 
-	number, err := s.issueRepo.NextNumber(ctx, tx, teamID)
+	number, err := s.issueRepo.NextNumber(ctx, tx, workspaceID, prefix)
 	if err != nil {
 		return nil, err
 	}
-
-	var identifier string
-	if team != nil {
-		identifier = fmt.Sprintf("%s-%d", team.Key, number)
-	} else {
-		identifier = fmt.Sprintf("NOTEAM-%d", number)
-	}
+	identifier := fmt.Sprintf("%s-%d", prefix, number)
 
 	status := domain.IssueStatusBacklog
 	if req.Status != "" {
@@ -128,7 +154,7 @@ func (s *IssueService) Create(ctx context.Context, workspaceID, creatorID uuid.U
 	issue := &domain.Issue{
 		ID:          uuid.New(),
 		WorkspaceID: workspaceID,
-		TeamID:      teamID,
+		ProjectID:   &project.ID,
 		Number:      number,
 		Identifier:  identifier,
 		Title:       req.Title,
@@ -136,28 +162,14 @@ func (s *IssueService) Create(ctx context.Context, workspaceID, creatorID uuid.U
 		Status:      status,
 		Priority:    priority,
 		CreatorID:   creatorID,
+		ParentID:    parentID,
 		SortOrder:   -float64(number) * 1000,
-		Triaged:     team == nil || !team.TriageEnabled,
+		Triaged:     true,
 	}
 
-	if req.ProjectID != nil {
-		pid, _ := uuid.Parse(*req.ProjectID)
-		issue.ProjectID = &pid
-	}
 	if req.AssigneeID != nil {
 		aid, _ := uuid.Parse(*req.AssigneeID)
 		issue.AssigneeID = &aid
-	}
-	if req.CycleID != nil {
-		cid, _ := uuid.Parse(*req.CycleID)
-		issue.CycleID = &cid
-	}
-	if req.ParentID != nil {
-		pid, _, err := s.validateParentID(ctx, workspaceID, uuid.Nil, *req.ParentID)
-		if err != nil {
-			return nil, err
-		}
-		issue.ParentID = pid
 	}
 	if req.DueDate != nil && *req.DueDate != "" {
 		t, err := time.Parse("2006-01-02", *req.DueDate)
@@ -166,25 +178,18 @@ func (s *IssueService) Create(ctx context.Context, workspaceID, creatorID uuid.U
 		}
 	}
 
-	// Resolve status_id (only when a team is assigned)
-	if teamID != nil {
-		if req.StatusID != nil {
-			sid, err := uuid.Parse(*req.StatusID)
-			if err == nil {
-				// Validate that the status belongs to the same team
-				ts, _ := s.teamStatusRepo.GetByID(ctx, sid)
-				if ts != nil && ts.TeamID == *teamID {
-					issue.StatusID = &sid
-					issue.Status = domain.IssueStatus(ts.Slug)
-				}
+	// Resolve status_id against the workspace statuses (always workspace-scoped)
+	if req.StatusID != nil {
+		if sid, err := uuid.Parse(*req.StatusID); err == nil {
+			if ts, _ := s.statusRepo.GetByID(ctx, sid); ts != nil && ts.WorkspaceID == workspaceID {
+				issue.StatusID = &sid
+				issue.Status = domain.IssueStatus(ts.Slug)
 			}
 		}
-		if issue.StatusID == nil {
-			// Look up the matching team_status by slug
-			ts, err := s.teamStatusRepo.GetByTeamAndSlug(ctx, *teamID, string(status))
-			if err == nil && ts != nil {
-				issue.StatusID = &ts.ID
-			}
+	}
+	if issue.StatusID == nil {
+		if ts, err := s.statusRepo.GetByWorkspaceAndSlug(ctx, workspaceID, string(status)); err == nil && ts != nil {
+			issue.StatusID = &ts.ID
 		}
 	}
 
@@ -253,37 +258,25 @@ func (s *IssueService) CreateSubIssue(ctx context.Context, workspaceID, creatorI
 		priority = *req.Priority
 	}
 	parentID := parent.ID.String()
-	var teamIDStr *string
-	if parent.TeamID != nil {
-		s := parent.TeamID.String()
-		teamIDStr = &s
-	}
 	createReq := dto.CreateIssueRequest{
 		Title:       req.Title,
 		Description: req.Description,
 		Status:      req.Status,
 		StatusID:    req.StatusID,
 		Priority:    &priority,
-		TeamID:      teamIDStr,
 		ProjectID:   req.ProjectID,
 		AssigneeID:  req.AssigneeID,
 		AssigneeIDs: req.AssigneeIDs,
 		LabelIDs:    req.LabelIDs,
 		ParentID:    &parentID,
 		DueDate:     req.DueDate,
-		CycleID:     req.CycleID,
 	}
 
+	// Sub-issues inherit the parent's project when none is given (Create also
+	// falls back to the parent, this keeps the request explicit).
 	if createReq.ProjectID == nil && parent.ProjectID != nil {
 		pid := parent.ProjectID.String()
 		createReq.ProjectID = &pid
-	}
-	if createReq.CycleID == nil && parent.CycleID != nil {
-		active, _ := s.issueRepo.CycleIsActive(ctx, *parent.CycleID)
-		if active {
-			cid := parent.CycleID.String()
-			createReq.CycleID = &cid
-		}
 	}
 	if len(createReq.AssigneeIDs) == 0 && createReq.AssigneeID == nil {
 		createReq.AssigneeIDs = s.inheritSubIssueAssignees(ctx, parent, creatorID)
@@ -342,7 +335,6 @@ func (s *IssueService) ConvertToProject(ctx context.Context, workspaceID, userID
 	project := &domain.Project{
 		ID:          uuid.New(),
 		WorkspaceID: workspaceID,
-		TeamID:      issue.TeamID,
 		Name:        sanitize.PlainText(sanitize.StripHTML(issue.Title)),
 		Description: issue.Description,
 		Status:      domain.ProjectStatusPlanned,
@@ -362,6 +354,7 @@ func (s *IssueService) ConvertToProject(ctx context.Context, workspaceID, userID
 	}
 
 	projectID := project.ID
+	prefix := projectPrefix(project.Name)
 	for _, item := range issuesToMove {
 		oldProject := ""
 		if item.ProjectID != nil {
@@ -377,6 +370,27 @@ func (s *IssueService) ConvertToProject(ctx context.Context, workspaceID, userID
 		if err := s.issueRepo.Update(ctx, item); err != nil {
 			return nil, err
 		}
+		// The issue moved to a new project: recalculate number + PREFIX-N
+		// identifier (same rule as an Update that changes the project).
+		tx, err := s.issueRepo.BeginTx(ctx)
+		if err != nil {
+			return nil, err
+		}
+		number, err := s.issueRepo.NextNumber(ctx, tx, workspaceID, prefix)
+		if err != nil {
+			tx.Rollback()
+			return nil, err
+		}
+		newIdentifier := fmt.Sprintf("%s-%d", prefix, number)
+		if err := s.issueRepo.UpdateProjectKey(ctx, tx, item.ID, &projectID, number, newIdentifier); err != nil {
+			tx.Rollback()
+			return nil, err
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		item.Number = number
+		item.Identifier = newIdentifier
 		if oldProject != newProject {
 			s.recordHistory(ctx, item.ID, userID, "project", &oldProject, &newProject)
 		}
@@ -413,17 +427,11 @@ func (s *IssueService) duplicateIssue(ctx context.Context, workspaceID, creatorI
 		title = title + " (copy)"
 	}
 	priority := int(original.Priority)
-	var teamIDStr *string
-	if original.TeamID != nil {
-		s := original.TeamID.String()
-		teamIDStr = &s
-	}
 	req := dto.CreateIssueRequest{
 		Title:       title,
 		Description: original.Description,
 		Status:      string(original.Status),
 		Priority:    &priority,
-		TeamID:      teamIDStr,
 		LabelIDs:    labelIDs,
 		AssigneeIDs: assigneeIDs,
 	}
@@ -434,10 +442,6 @@ func (s *IssueService) duplicateIssue(ctx context.Context, workspaceID, creatorI
 	if original.ProjectID != nil {
 		projectID := original.ProjectID.String()
 		req.ProjectID = &projectID
-	}
-	if original.CycleID != nil {
-		cycleID := original.CycleID.String()
-		req.CycleID = &cycleID
 	}
 	if original.DueDate != nil {
 		due := original.DueDate.Format("2006-01-02")
@@ -529,14 +533,14 @@ func (s *IssueService) Update(ctx context.Context, workspaceID, userID uuid.UUID
 				// Look up old and new status names for history
 				var oldName string
 				if issue.StatusID != nil {
-					oldStatus, _ := s.teamStatusRepo.GetByID(ctx, *issue.StatusID)
+					oldStatus, _ := s.statusRepo.GetByID(ctx, *issue.StatusID)
 					if oldStatus != nil {
 						oldName = oldStatus.Name
 					}
 				}
-				newStatus, _ := s.teamStatusRepo.GetByID(ctx, sid)
-				// Validate that the status belongs to the same team as the issue
-				if newStatus != nil && issue.TeamID != nil && newStatus.TeamID == *issue.TeamID {
+				newStatus, _ := s.statusRepo.GetByID(ctx, sid)
+				// Validate that the status belongs to the issue's workspace
+				if newStatus != nil && newStatus.WorkspaceID == workspaceID {
 					newName := newStatus.Name
 					issue.StatusID = &sid
 					// Update legacy status field for backward compat
@@ -556,8 +560,8 @@ func (s *IssueService) Update(ctx context.Context, workspaceID, userID uuid.UUID
 		s.recordHistory(ctx, issue.ID, userID, "status", &old, req.Status)
 		changes.addField("status")
 		// Also update status_id to match the new legacy status slug
-		if issue.TeamID != nil {
-			ts, err := s.teamStatusRepo.GetByTeamAndSlug(ctx, *issue.TeamID, *req.Status)
+		{
+			ts, err := s.statusRepo.GetByWorkspaceAndSlug(ctx, workspaceID, *req.Status)
 			if err == nil && ts != nil {
 				issue.StatusID = &ts.ID
 			}
@@ -569,66 +573,6 @@ func (s *IssueService) Update(ctx context.Context, workspaceID, userID uuid.UUID
 		newVal := fmt.Sprintf("%d", *req.Priority)
 		s.recordHistory(ctx, issue.ID, userID, "priority", &old, &newVal)
 		changes.addField("priority")
-	}
-	// Handle team change (moving issue between teams)
-	if req.TeamID != nil {
-		oldTeamStr := ""
-		if issue.TeamID != nil {
-			oldTeamStr = issue.TeamID.String()
-		}
-		var newTeamID *uuid.UUID
-		if *req.TeamID != "" {
-			tid, err := uuid.Parse(*req.TeamID)
-			if err != nil {
-				return nil, fmt.Errorf("invalid team_id")
-			}
-			newTeamID = &tid
-		}
-		newTeamStr := ""
-		if newTeamID != nil {
-			newTeamStr = newTeamID.String()
-		}
-		if oldTeamStr != newTeamStr {
-			// Get the new team to generate a new identifier
-			tx, err := s.issueRepo.BeginTx(ctx)
-			if err != nil {
-				return nil, err
-			}
-			defer tx.Rollback()
-
-			var newNumber int
-			var newIdentifier string
-			if newTeamID != nil {
-				newTeam, err := s.teamRepo.GetByID(ctx, *newTeamID)
-				if err != nil || newTeam == nil {
-					return nil, fmt.Errorf("team not found")
-				}
-				newNumber, err = s.issueRepo.NextNumber(ctx, tx, newTeamID)
-				if err != nil {
-					return nil, err
-				}
-				newIdentifier = fmt.Sprintf("%s-%d", newTeam.Key, newNumber)
-			} else {
-				newNumber, err = s.issueRepo.NextNumber(ctx, tx, nil)
-				if err != nil {
-					return nil, err
-				}
-				newIdentifier = fmt.Sprintf("NOTEAM-%d", newNumber)
-			}
-
-			if err := s.issueRepo.UpdateTeam(ctx, tx, issue.ID, newTeamID, newNumber, newIdentifier); err != nil {
-				return nil, err
-			}
-			if err := tx.Commit(); err != nil {
-				return nil, err
-			}
-
-			issue.TeamID = newTeamID
-			issue.Number = newNumber
-			issue.Identifier = newIdentifier
-			s.recordHistory(ctx, issue.ID, userID, "team", &oldTeamStr, &newTeamStr)
-			changes.addField("team")
-		}
 	}
 	if req.AssigneeID != nil {
 		old := ""
@@ -646,44 +590,64 @@ func (s *IssueService) Update(ctx context.Context, workspaceID, userID uuid.UUID
 			}
 		}
 	}
+	// Handle project change: recalculate the number and the PREFIX-N identifier
+	// (this replaces the old team-change identifier logic).
 	if req.ProjectID != nil {
+		var newProject *domain.Project
+		var newProjectID *uuid.UUID
+		if *req.ProjectID != "" {
+			pid, err := uuid.Parse(*req.ProjectID)
+			if err != nil {
+				return nil, fmt.Errorf("invalid project_id")
+			}
+			if s.projectRepo == nil {
+				return nil, fmt.Errorf("project repository unavailable")
+			}
+			newProject, err = s.projectRepo.GetByID(ctx, pid)
+			if err != nil {
+				return nil, err
+			}
+			if newProject == nil || newProject.WorkspaceID != workspaceID {
+				return nil, fmt.Errorf("project not found")
+			}
+			newProjectID = &pid
+		}
+
 		old := ""
 		if issue.ProjectID != nil {
 			old = issue.ProjectID.String()
 		}
-		if *req.ProjectID == "" {
-			issue.ProjectID = nil
-		} else {
-			pid, _ := uuid.Parse(*req.ProjectID)
-			issue.ProjectID = &pid
-		}
 		newVal := ""
-		if issue.ProjectID != nil {
-			newVal = issue.ProjectID.String()
+		if newProjectID != nil {
+			newVal = newProjectID.String()
 		}
 		if old != newVal {
+			prefix := s.prefixForProject(ctx, workspaceID, newProject)
+
+			tx, err := s.issueRepo.BeginTx(ctx)
+			if err != nil {
+				return nil, err
+			}
+			defer tx.Rollback()
+
+			newNumber, err := s.issueRepo.NextNumber(ctx, tx, workspaceID, prefix)
+			if err != nil {
+				return nil, err
+			}
+			newIdentifier := fmt.Sprintf("%s-%d", prefix, newNumber)
+
+			if err := s.issueRepo.UpdateProjectKey(ctx, tx, issue.ID, newProjectID, newNumber, newIdentifier); err != nil {
+				return nil, err
+			}
+			if err := tx.Commit(); err != nil {
+				return nil, err
+			}
+
+			issue.ProjectID = newProjectID
+			issue.Number = newNumber
+			issue.Identifier = newIdentifier
 			s.recordHistory(ctx, issue.ID, userID, "project", &old, &newVal)
 			changes.addField("project")
-		}
-	}
-	if req.CycleID != nil {
-		old := ""
-		if issue.CycleID != nil {
-			old = issue.CycleID.String()
-		}
-		if *req.CycleID == "" {
-			issue.CycleID = nil
-		} else {
-			cid, _ := uuid.Parse(*req.CycleID)
-			issue.CycleID = &cid
-		}
-		newVal := ""
-		if issue.CycleID != nil {
-			newVal = issue.CycleID.String()
-		}
-		if old != newVal {
-			s.recordHistory(ctx, issue.ID, userID, "cycle", &old, &newVal)
-			changes.addField("cycle")
 		}
 	}
 	if req.ParentID != nil {
@@ -874,12 +838,8 @@ func (s *IssueService) Triage(ctx context.Context, workspaceID, userID uuid.UUID
 		issue.Status = domain.IssueStatusCancelled
 		newVal := string(domain.IssueStatusCancelled)
 		s.recordHistory(ctx, issue.ID, userID, "status", &old, &newVal)
-		// Look up the team's cancelled status
-		var cancelledStatus *domain.TeamStatus
-		if issue.TeamID != nil {
-			cancelledStatus, _ = s.teamStatusRepo.GetByTeamAndSlug(ctx, *issue.TeamID, string(domain.IssueStatusCancelled))
-		}
-		if cancelledStatus != nil {
+		// Look up the workspace's cancelled status
+		if cancelledStatus, _ := s.statusRepo.GetByWorkspaceAndSlug(ctx, issue.WorkspaceID, string(domain.IssueStatusCancelled)); cancelledStatus != nil {
 			issue.StatusID = &cancelledStatus.ID
 		}
 	}
@@ -1010,21 +970,11 @@ func (s *IssueService) BulkUpdate(ctx context.Context, workspaceID, userID uuid.
 		statusID = &sid
 	}
 
-	var cycleID *uuid.UUID
-	cycleSet := req.CycleID != nil
-	if req.CycleID != nil && *req.CycleID != "" {
-		cid, err := uuid.Parse(*req.CycleID)
-		if err != nil {
-			return 0, fmt.Errorf("invalid cycle_id")
-		}
-		cycleID = &cid
-	}
-
 	if req.ParentID != nil {
 		return s.bulkUpdateParent(ctx, workspaceID, userID, issueIDs, *req.ParentID)
 	}
 
-	n, err := s.issueRepo.BulkUpdate(ctx, workspaceID, issueIDs, req.Status, req.Priority, assigneeID, statusID, cycleID, cycleSet)
+	n, err := s.issueRepo.BulkUpdate(ctx, workspaceID, issueIDs, req.Status, req.Priority, assigneeID, statusID)
 	if err != nil {
 		return 0, err
 	}
@@ -1177,14 +1127,11 @@ func (s *IssueService) applyStatusAutomation(ctx context.Context, workspaceID, a
 	}
 	visited[issue.ID] = true
 
+	// Sub-issue auto-close used to be gated by a per-team setting; with teams
+	// removed it now applies to every completed issue.
 	category := s.issueStatusCategory(ctx, issue)
 	if category == domain.StatusCategoryCompleted {
-		if issue.TeamID != nil {
-			team, err := s.teamRepo.GetByID(ctx, *issue.TeamID)
-			if err == nil && team != nil && team.SubIssueAutoCloseEnabled {
-				s.autoCloseSubIssues(ctx, workspaceID, actorID, issue.ID, visited)
-			}
-		}
+		s.autoCloseSubIssues(ctx, workspaceID, actorID, issue.ID, visited)
 	}
 
 	if issue.ParentID != nil {
@@ -1195,13 +1142,6 @@ func (s *IssueService) applyStatusAutomation(ctx context.Context, workspaceID, a
 func (s *IssueService) maybeAutoCloseParent(ctx context.Context, workspaceID, actorID, parentID uuid.UUID, visited map[uuid.UUID]bool) {
 	parent, err := s.issueRepo.GetByID(ctx, parentID)
 	if err != nil || parent == nil || parent.WorkspaceID != workspaceID || visited[parent.ID] {
-		return
-	}
-	if parent.TeamID == nil {
-		return
-	}
-	team, err := s.teamRepo.GetByID(ctx, *parent.TeamID)
-	if err != nil || team == nil || !team.ParentAutoCloseEnabled {
 		return
 	}
 	total, done, err := s.issueRepo.CountSubIssues(ctx, parent.ID)
@@ -1226,10 +1166,10 @@ func (s *IssueService) autoCloseSubIssues(ctx context.Context, workspaceID, acto
 }
 
 func (s *IssueService) moveIssueToCompleted(ctx context.Context, workspaceID, actorID uuid.UUID, issue *domain.Issue, visited map[uuid.UUID]bool) {
-	if issue == nil || issue.TeamID == nil || s.isTerminalStatus(ctx, issue) {
+	if issue == nil || s.isTerminalStatus(ctx, issue) {
 		return
 	}
-	completedStatus, err := s.completedStatusForTeam(ctx, *issue.TeamID)
+	completedStatus, err := s.completedStatus(ctx, workspaceID)
 	if err != nil || completedStatus == nil {
 		return
 	}
@@ -1247,12 +1187,14 @@ func (s *IssueService) moveIssueToCompleted(ctx context.Context, workspaceID, ac
 	s.applyStatusAutomation(ctx, workspaceID, actorID, issue, visited)
 }
 
-func (s *IssueService) completedStatusForTeam(ctx context.Context, teamID uuid.UUID) (*domain.TeamStatus, error) {
-	status, err := s.teamStatusRepo.GetByTeamAndSlug(ctx, teamID, string(domain.IssueStatusDone))
+// completedStatus returns the status used to close issues for a workspace: the
+// "done" status, or the first status whose category is "completed".
+func (s *IssueService) completedStatus(ctx context.Context, workspaceID uuid.UUID) (*domain.WorkspaceStatus, error) {
+	status, err := s.statusRepo.GetByWorkspaceAndSlug(ctx, workspaceID, string(domain.IssueStatusDone))
 	if err == nil && status != nil {
 		return status, nil
 	}
-	statuses, err := s.teamStatusRepo.ListByTeam(ctx, teamID)
+	statuses, err := s.statusRepo.ListByWorkspace(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -1271,7 +1213,7 @@ func (s *IssueService) isTerminalStatus(ctx context.Context, issue *domain.Issue
 
 func (s *IssueService) issueStatusCategory(ctx context.Context, issue *domain.Issue) domain.StatusCategory {
 	if issue.StatusID != nil {
-		status, err := s.teamStatusRepo.GetByID(ctx, *issue.StatusID)
+		status, err := s.statusRepo.GetByID(ctx, *issue.StatusID)
 		if err == nil && status != nil {
 			return status.Category
 		}
@@ -1492,13 +1434,79 @@ func bulkUpdateFields(req dto.BulkUpdateIssueRequest) []string {
 	if req.AssigneeID != nil {
 		fields = append(fields, "assignee")
 	}
-	if req.CycleID != nil {
-		fields = append(fields, "cycle")
-	}
 	if req.LabelIDs != nil {
 		fields = append(fields, "labels")
 	}
 	return fields
+}
+
+// projectPrefix derives the issue identifier prefix from a project name:
+//   - split the name on non-alphanumeric characters
+//   - >= 2 words  → initials of up to 4 words, uppercased ("Frontend App" → "FA")
+//   - 1 word      → first 4 alphanumeric characters, uppercased ("Backend" → "BACK")
+//   - empty       → "PRJ"
+func projectPrefix(name string) string {
+	words := splitPrefixWords(name)
+	if len(words) == 0 {
+		return "PRJ"
+	}
+	if len(words) >= 2 {
+		limit := len(words)
+		if limit > 4 {
+			limit = 4
+		}
+		var b strings.Builder
+		for _, w := range words[:limit] {
+			b.WriteString(strings.ToUpper(w[:1]))
+		}
+		if b.Len() == 0 {
+			return "PRJ"
+		}
+		return b.String()
+	}
+	alnum := alphanumericOnly(words[0])
+	if len(alnum) > 4 {
+		alnum = alnum[:4]
+	}
+	if alnum == "" {
+		return "PRJ"
+	}
+	return strings.ToUpper(alnum)
+}
+
+func splitPrefixWords(name string) []string {
+	return strings.FieldsFunc(name, func(r rune) bool {
+		return !isAlphanumeric(r)
+	})
+}
+
+func alphanumericOnly(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if isAlphanumeric(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func isAlphanumeric(r rune) bool {
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
+}
+
+// prefixForProject returns the identifier prefix for an issue: the project
+// prefix, or the uppercased workspace slug when there is no project (fallback
+// from the spec — it should not normally happen).
+func (s *IssueService) prefixForProject(ctx context.Context, workspaceID uuid.UUID, project *domain.Project) string {
+	if project != nil {
+		return projectPrefix(project.Name)
+	}
+	if s.workspaceRepo != nil {
+		if ws, err := s.workspaceRepo.GetByID(ctx, workspaceID); err == nil && ws != nil && ws.Slug != "" {
+			return strings.ToUpper(ws.Slug)
+		}
+	}
+	return "PRJ"
 }
 
 func uuidSet(ids []uuid.UUID) map[uuid.UUID]bool {

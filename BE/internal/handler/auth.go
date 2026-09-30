@@ -155,6 +155,9 @@ func (h *AuthHandler) UpdateProfile(c echo.Context) error {
 
 	userID := middleware.GetUserID(c)
 	user, err := h.authService.UpdateProfile(c.Request().Context(), userID, req)
+	if errors.Is(err, service.ErrInvalidGiteaLogin) {
+		return response.Error(c, http.StatusBadRequest, "INVALID_GITEA_LOGIN", err.Error())
+	}
 	if err != nil || user == nil {
 		return response.NotFound(c, "User")
 	}
@@ -168,6 +171,7 @@ func (h *AuthHandler) userResponse(user *domain.User) dto.UserResponse {
 		Name:        user.Name,
 		DisplayName: user.DisplayName,
 		AvatarURL:   user.AvatarURL,
+		GiteaLogin:  user.GiteaLogin,
 		IsSysAdmin:  h.isSysAdmin(user.ID),
 	}
 }

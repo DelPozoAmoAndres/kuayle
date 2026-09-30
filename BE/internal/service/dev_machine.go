@@ -761,8 +761,6 @@ func scopePointers(scopeType string, scopeID *uuid.UUID) (teamID, projectID, iss
 		if scopeID != nil {
 			err = fmt.Errorf("%w: workspace scope does not accept scope_id", ErrInvalidMachineInput)
 		}
-	case "team":
-		teamID = scopeID
 	case "project":
 		projectID = scopeID
 	case "issue":
@@ -784,14 +782,8 @@ func (s *DevMachineService) resolveDevelopmentSetting(ctx context.Context, works
 		if issue.ProjectID != nil {
 			scopes = append(scopes, [3]*uuid.UUID{nil, issue.ProjectID, nil})
 		}
-		if issue.TeamID != nil {
-			scopes = append(scopes, [3]*uuid.UUID{issue.TeamID, nil, nil})
-		}
 	} else if project != nil {
 		scopes = append(scopes, [3]*uuid.UUID{nil, &project.ID, nil})
-		if project.TeamID != nil {
-			scopes = append(scopes, [3]*uuid.UUID{project.TeamID, nil, nil})
-		}
 	}
 	scopes = append(scopes, [3]*uuid.UUID{nil, nil, nil})
 	for _, scope := range scopes {

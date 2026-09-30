@@ -20,18 +20,13 @@ func NewAnalyticsRepository(db *sqlx.DB) *AnalyticsRepository {
 	return &AnalyticsRepository{db: db}
 }
 
-func (r *AnalyticsRepository) Overview(ctx context.Context, workspaceID, teamID string) (*dto.AnalyticsOverview, error) {
+func (r *AnalyticsRepository) Overview(ctx context.Context, workspaceID string) (*dto.AnalyticsOverview, error) {
 	var o dto.AnalyticsOverview
 	statusCategory := issueStatusCategoryExpr("i", "ts")
-	issueScope := ""
 	args := []interface{}{workspaceID}
-	if teamID != "" {
-		issueScope = " AND i.team_id = $2"
-		args = append(args, teamID)
-	}
 
 	err := r.db.GetContext(ctx, &o.TotalIssues,
-		`SELECT COUNT(*) FROM issues i WHERE i.workspace_id = $1`+issueScope, args...)
+		`SELECT COUNT(*) FROM issues i WHERE i.workspace_id = $1`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +36,7 @@ func (r *AnalyticsRepository) Overview(ctx context.Context, workspaceID, teamID 
 		 FROM issues i
 		 LEFT JOIN team_statuses ts ON ts.id = i.status_id
 		 WHERE i.workspace_id = $1
-		   AND %s NOT IN ('completed', 'cancelled')`, statusCategory)+issueScope, args...)
+		   AND %s NOT IN ('completed', 'cancelled')`, statusCategory), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -50,7 +45,7 @@ func (r *AnalyticsRepository) Overview(ctx context.Context, workspaceID, teamID 
 		fmt.Sprintf(`SELECT COUNT(*)
 		 FROM issues i
 		 LEFT JOIN team_statuses ts ON ts.id = i.status_id
-		 WHERE i.workspace_id = $1 AND %s = 'completed'`, statusCategory)+issueScope, args...)
+		 WHERE i.workspace_id = $1 AND %s = 'completed'`, statusCategory), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -61,30 +56,19 @@ func (r *AnalyticsRepository) Overview(ctx context.Context, workspaceID, teamID 
 		 LEFT JOIN team_statuses ts ON ts.id = i.status_id
 		 WHERE i.workspace_id = $1
 		   AND i.due_date < CURRENT_DATE
-		   AND %s NOT IN ('completed', 'cancelled')`, statusCategory)+issueScope, args...)
+		   AND %s NOT IN ('completed', 'cancelled')`, statusCategory), args...)
 	if err != nil {
 		return nil, err
 	}
 
-	projectScope := ""
-	if teamID != "" {
-		projectScope = " AND team_id = $2"
-	}
 	err = r.db.GetContext(ctx, &o.TotalProjects,
-		`SELECT COUNT(*) FROM projects WHERE workspace_id = $1`+projectScope, args...)
+		`SELECT COUNT(*) FROM projects WHERE workspace_id = $1`, workspaceID)
 	if err != nil {
 		return nil, err
 	}
 
-	if teamID == "" {
-		err = r.db.GetContext(ctx, &o.TotalMembers,
-			`SELECT COUNT(*) FROM workspace_members WHERE workspace_id = $1`, workspaceID)
-	} else {
-		err = r.db.GetContext(ctx, &o.TotalMembers,
-			`SELECT COUNT(*) FROM team_members tm
-			 INNER JOIN teams t ON t.id = tm.team_id
-			 WHERE t.workspace_id = $1 AND tm.team_id = $2`, workspaceID, teamID)
-	}
+	err = r.db.GetContext(ctx, &o.TotalMembers,
+		`SELECT COUNT(*) FROM workspace_members WHERE workspace_id = $1`, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -92,7 +76,7 @@ func (r *AnalyticsRepository) Overview(ctx context.Context, workspaceID, teamID 
 	err = r.db.GetContext(ctx, &o.StartedIssues,
 		fmt.Sprintf(`SELECT COUNT(*) FROM issues i
 		 LEFT JOIN team_statuses ts ON ts.id = i.status_id
-		 WHERE i.workspace_id = $1 AND %s = 'started'`, statusCategory)+issueScope, args...)
+		 WHERE i.workspace_id = $1 AND %s = 'started'`, statusCategory), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +87,7 @@ func (r *AnalyticsRepository) Overview(ctx context.Context, workspaceID, teamID 
 		 LEFT JOIN team_statuses ts ON ts.id = i.status_id
 		 WHERE i.workspace_id = $1
 		   AND %s NOT IN ('completed', 'cancelled')
-		   AND NOT EXISTS (SELECT 1 FROM issue_assignees ia WHERE ia.issue_id = i.id)`, statusCategory)+issueScope, args...)
+		   AND NOT EXISTS (SELECT 1 FROM issue_assignees ia WHERE ia.issue_id = i.id)`, statusCategory), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +100,7 @@ func (r *AnalyticsRepository) Overview(ctx context.Context, workspaceID, teamID 
 	err = r.db.GetContext(ctx, &o.AvgLeadTimeHours,
 		`SELECT COALESCE(EXTRACT(EPOCH FROM AVG(i.completed_at - i.created_at)) / 3600.0, 0)
 		 FROM issues i
-		 WHERE i.workspace_id = $1 AND i.completed_at IS NOT NULL`+issueScope, args...)
+		 WHERE i.workspace_id = $1 AND i.completed_at IS NOT NULL`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +110,7 @@ func (r *AnalyticsRepository) Overview(ctx context.Context, workspaceID, teamID 
 		 FROM issues i
 		 WHERE i.workspace_id = $1
 		   AND i.completed_at IS NOT NULL
-		   AND i.started_at IS NOT NULL`+issueScope, args...)
+		   AND i.started_at IS NOT NULL`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -134,25 +118,15 @@ func (r *AnalyticsRepository) Overview(ctx context.Context, workspaceID, teamID 
 	return &o, nil
 }
 
-func (r *AnalyticsRepository) Distribution(ctx context.Context, workspaceID, teamID string) (*dto.AnalyticsIssueDistribution, error) {
-	teamScope := ""
+func (r *AnalyticsRepository) Distribution(ctx context.Context, workspaceID string) (*dto.AnalyticsIssueDistribution, error) {
 	args := []interface{}{workspaceID}
-	if teamID != "" {
-		teamScope = " AND t.id = $2"
-		args = append(args, teamID)
-	}
-	issueTeamScope := ""
-	if teamID != "" {
-		issueTeamScope = " AND i.team_id = $2"
-	}
 	var byStatus []dto.StatusCount
 	err := r.db.SelectContext(ctx, &byStatus,
 		`SELECT ts.id::text AS status_id, ts.name AS name, ts.category::text AS category, ts.color,
 		        COUNT(i.id) AS count
 		 FROM team_statuses ts
-		 INNER JOIN teams t ON t.id = ts.team_id
 		 LEFT JOIN issues i ON i.status_id = ts.id AND i.workspace_id = $1
-		 WHERE t.workspace_id = $1`+teamScope+`
+		 WHERE ts.workspace_id = $1
 		 GROUP BY ts.id, ts.name, ts.category, ts.color, ts.position
 		 ORDER BY ts.position`, args...)
 	if err != nil {
@@ -162,7 +136,7 @@ func (r *AnalyticsRepository) Distribution(ctx context.Context, workspaceID, tea
 	var byPriority []dto.PriorityCount
 	err = r.db.SelectContext(ctx, &byPriority,
 		`SELECT priority, COUNT(*) AS count
-		 FROM issues i WHERE i.workspace_id = $1`+issueTeamScope+`
+		 FROM issues i WHERE i.workspace_id = $1
 		 GROUP BY priority ORDER BY priority`, args...)
 	if err != nil {
 		return nil, err
@@ -186,7 +160,7 @@ var allowedMeasures = map[string]bool{
 }
 var allowedDims = map[string]bool{
 	"none": true, "status_type": true, "status": true, "priority": true,
-	"assignee": true, "team": true, "project": true, "cycle": true, "label": true, "creator": true,
+	"assignee": true, "project": true, "cycle": true, "label": true, "creator": true,
 }
 
 var allowedStatusTypes = map[string]bool{
@@ -281,7 +255,6 @@ func ValidateInsightParams(params *dto.AnalyticsInsightsParams) error {
 		value     *string
 		allowNone bool
 	}{
-		{"team_id", params.TeamID, false},
 		{"project_id", params.ProjectID, true},
 		{"cycle_id", params.CycleID, true},
 		{"assignee_id", params.AssigneeID, true},
@@ -356,7 +329,6 @@ func ValidateBurnupParams(params *dto.AnalyticsBurnupParams) error {
 		value     *string
 		allowNone bool
 	}{
-		{"team_id", params.TeamID, false},
 		{"project_id", params.ProjectID, true},
 		{"cycle_id", params.CycleID, true},
 		{"assignee_id", params.AssigneeID, true},
@@ -789,8 +761,6 @@ func (r *AnalyticsRepository) dimensionPointParts(dim, alias string) (selectPart
 		return fmt.Sprintf("COALESCE(ia_%s.user_id::text, 'unassigned')", alias),
 			fmt.Sprintf("LEFT JOIN issue_assignees ia_%s ON ia_%s.issue_id = i.id", alias, alias),
 			"", ""
-	case "team":
-		return "i.team_id::text", "", "", ""
 	case "project":
 		return "COALESCE(i.project_id::text, '__null__')", "", "", ""
 	case "cycle":
@@ -885,11 +855,6 @@ func (r *AnalyticsRepository) dimensionParts(dim, alias string) (selectPart, joi
 			fmt.Sprintf("LEFT JOIN issue_assignees ia_%s ON ia_%s.issue_id = i.id LEFT JOIN users u_%s ON u_%s.id = ia_%s.user_id", alias, alias, alias, alias, alias),
 			fmt.Sprintf("ia_%s.user_id, u_%s.display_name, u_%s.name", alias, alias, alias),
 			""
-	case "team":
-		return fmt.Sprintf("i.team_id::text AS %s_key, t_%s.name AS %s_label, NULL AS %s_color", alias, alias, alias, alias),
-			fmt.Sprintf("LEFT JOIN teams t_%s ON t_%s.id = i.team_id", alias, alias),
-			fmt.Sprintf("i.team_id, t_%s.name", alias),
-			""
 	case "project":
 		return fmt.Sprintf("COALESCE(i.project_id::text, '__null__') AS %s_key, COALESCE(p_%s.name, 'No project') AS %s_label, NULL AS %s_color", alias, alias, alias, alias),
 			fmt.Sprintf("LEFT JOIN projects p_%s ON p_%s.id = i.project_id", alias, alias),
@@ -929,11 +894,6 @@ func (r *AnalyticsRepository) buildInsightWhere(workspaceID string, params *dto.
 	if params.To != "" {
 		where = append(where, fmt.Sprintf("%s < ($%d::date + INTERVAL '1 day')", dateCol, idx))
 		args = append(args, params.To)
-		idx++
-	}
-	if params.TeamID != nil && *params.TeamID != "" {
-		where = append(where, fmt.Sprintf("i.team_id = $%d", idx))
-		args = append(args, *params.TeamID)
 		idx++
 	}
 	if params.ProjectID != nil && *params.ProjectID != "" {
@@ -1001,11 +961,6 @@ func (r *AnalyticsRepository) buildBurnupQuery(workspaceID string, params *dto.A
 	whereArgs := []interface{}{workspaceID}
 	idx := 2
 
-	if params.TeamID != nil && *params.TeamID != "" {
-		issueWhere = append(issueWhere, fmt.Sprintf("i.team_id = $%d", idx))
-		whereArgs = append(whereArgs, *params.TeamID)
-		idx++
-	}
 	if params.ProjectID != nil && *params.ProjectID != "" {
 		if *params.ProjectID == "none" {
 			issueWhere = append(issueWhere, "i.project_id IS NULL")

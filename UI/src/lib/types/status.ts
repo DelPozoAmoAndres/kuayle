@@ -2,9 +2,9 @@ import { m } from '$lib/paraglide/messages.js';
 
 export type StatusCategory = 'backlog' | 'unstarted' | 'started' | 'completed' | 'cancelled';
 
-export interface TeamStatus {
+export interface WorkspaceStatus {
 	id: string;
-	team_id: string;
+	workspace_id: string;
 	name: string;
 	slug: string;
 	category: StatusCategory;

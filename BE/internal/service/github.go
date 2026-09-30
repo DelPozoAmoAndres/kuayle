@@ -37,16 +37,15 @@ type GlobalGitHubAppConfig struct {
 }
 
 type GitHubService struct {
-	ghRepo         *repository.GitHubRepository
-	issueRepo      repository.IssueRepo
-	teamRepo       repository.TeamRepo
-	teamStatusRepo repository.TeamStatusRepo
-	historyRepo    repository.IssueHistoryRepo
-	encryptionKey  []byte
-	hub            *realtime.Hub
-	frontendURL    string
-	webhookURL     string                 // optional override (e.g. smee.io for dev)
-	globalApp      *GlobalGitHubAppConfig // nil = self-hosted mode
+	ghRepo        *repository.GitHubRepository
+	issueRepo     repository.IssueRepo
+	statusRepo    repository.StatusRepo
+	historyRepo   repository.IssueHistoryRepo
+	encryptionKey []byte
+	hub           *realtime.Hub
+	frontendURL   string
+	webhookURL    string                 // optional override (e.g. smee.io for dev)
+	globalApp     *GlobalGitHubAppConfig // nil = self-hosted mode
 }
 
 // IsGlobalMode returns true when a shared GitHub App is configured via env vars.
@@ -57,8 +56,7 @@ func (s *GitHubService) IsGlobalMode() bool {
 func NewGitHubService(
 	ghRepo *repository.GitHubRepository,
 	issueRepo repository.IssueRepo,
-	teamRepo repository.TeamRepo,
-	teamStatusRepo repository.TeamStatusRepo,
+	statusRepo repository.StatusRepo,
 	historyRepo repository.IssueHistoryRepo,
 	encryptionKey []byte,
 	hub *realtime.Hub,
@@ -67,16 +65,15 @@ func NewGitHubService(
 	globalApp *GlobalGitHubAppConfig,
 ) *GitHubService {
 	return &GitHubService{
-		ghRepo:         ghRepo,
-		issueRepo:      issueRepo,
-		teamRepo:       teamRepo,
-		teamStatusRepo: teamStatusRepo,
-		historyRepo:    historyRepo,
-		encryptionKey:  encryptionKey,
-		hub:            hub,
-		frontendURL:    frontendURL,
-		webhookURL:     webhookURL,
-		globalApp:      globalApp,
+		ghRepo:        ghRepo,
+		issueRepo:     issueRepo,
+		statusRepo:    statusRepo,
+		historyRepo:   historyRepo,
+		encryptionKey: encryptionKey,
+		hub:           hub,
+		frontendURL:   frontendURL,
+		webhookURL:    webhookURL,
+		globalApp:     globalApp,
 	}
 }
 
@@ -920,12 +917,9 @@ func (s *GitHubService) applyAutoTransition(ctx context.Context, workspaceID uui
 	if rule.TargetStatusID != nil {
 		issue.StatusID = rule.TargetStatusID
 	} else {
-		// Resolve the team's custom status ID from the slug
-		if issue.TeamID != nil {
-			ts, err := s.teamStatusRepo.GetByTeamAndSlug(ctx, *issue.TeamID, newStatus)
-			if err == nil && ts != nil {
-				issue.StatusID = &ts.ID
-			}
+		// Resolve the workspace status ID from the slug
+		if ts, err := s.statusRepo.GetByWorkspaceAndSlug(ctx, workspaceID, newStatus); err == nil && ts != nil {
+			issue.StatusID = &ts.ID
 		}
 	}
 
@@ -944,17 +938,16 @@ func (s *GitHubService) applyAutoTransition(ctx context.Context, workspaceID uui
 }
 
 func (s *GitHubService) applyStatusAutomation(ctx context.Context, workspaceID uuid.UUID, issue *domain.Issue, visited map[uuid.UUID]bool) {
-	if issue == nil || visited[issue.ID] || s.teamRepo == nil {
+	if issue == nil || visited[issue.ID] {
 		return
 	}
 	visited[issue.ID] = true
 
+	// Sub-issue auto-close used to be gated by a per-team setting; with teams
+	// removed it now applies to every completed issue.
 	category := s.issueStatusCategory(ctx, issue)
-	if category == domain.StatusCategoryCompleted && issue.TeamID != nil {
-		team, err := s.teamRepo.GetByID(ctx, *issue.TeamID)
-		if err == nil && team != nil && team.SubIssueAutoCloseEnabled {
-			s.autoCloseSubIssues(ctx, workspaceID, issue.ID, visited)
-		}
+	if category == domain.StatusCategoryCompleted {
+		s.autoCloseSubIssues(ctx, workspaceID, issue.ID, visited)
 	}
 	if issue.ParentID != nil {
 		s.maybeAutoCloseParent(ctx, workspaceID, *issue.ParentID, visited)
@@ -963,14 +956,7 @@ func (s *GitHubService) applyStatusAutomation(ctx context.Context, workspaceID u
 
 func (s *GitHubService) maybeAutoCloseParent(ctx context.Context, workspaceID, parentID uuid.UUID, visited map[uuid.UUID]bool) {
 	parent, err := s.issueRepo.GetByID(ctx, parentID)
-	if err != nil || parent == nil || parent.WorkspaceID != workspaceID || visited[parent.ID] || s.teamRepo == nil {
-		return
-	}
-	if parent.TeamID == nil {
-		return
-	}
-	team, err := s.teamRepo.GetByID(ctx, *parent.TeamID)
-	if err != nil || team == nil || !team.ParentAutoCloseEnabled {
+	if err != nil || parent == nil || parent.WorkspaceID != workspaceID || visited[parent.ID] {
 		return
 	}
 	total, done, err := s.issueRepo.CountSubIssues(ctx, parent.ID)
@@ -995,10 +981,10 @@ func (s *GitHubService) autoCloseSubIssues(ctx context.Context, workspaceID, par
 }
 
 func (s *GitHubService) moveIssueToCompleted(ctx context.Context, workspaceID uuid.UUID, issue *domain.Issue, visited map[uuid.UUID]bool) {
-	if issue == nil || issue.TeamID == nil || s.isTerminalStatus(ctx, issue) {
+	if issue == nil || s.isTerminalStatus(ctx, issue) {
 		return
 	}
-	completedStatus, err := s.completedStatusForTeam(ctx, *issue.TeamID)
+	completedStatus, err := s.completedStatus(ctx, workspaceID)
 	if err != nil || completedStatus == nil {
 		return
 	}
@@ -1016,12 +1002,14 @@ func (s *GitHubService) moveIssueToCompleted(ctx context.Context, workspaceID uu
 	s.applyStatusAutomation(ctx, workspaceID, issue, visited)
 }
 
-func (s *GitHubService) completedStatusForTeam(ctx context.Context, teamID uuid.UUID) (*domain.TeamStatus, error) {
-	status, err := s.teamStatusRepo.GetByTeamAndSlug(ctx, teamID, string(domain.IssueStatusDone))
+// completedStatus returns the status used to close issues for a workspace: the
+// "done" status, or the first status whose category is "completed".
+func (s *GitHubService) completedStatus(ctx context.Context, workspaceID uuid.UUID) (*domain.WorkspaceStatus, error) {
+	status, err := s.statusRepo.GetByWorkspaceAndSlug(ctx, workspaceID, string(domain.IssueStatusDone))
 	if err == nil && status != nil {
 		return status, nil
 	}
-	statuses, err := s.teamStatusRepo.ListByTeam(ctx, teamID)
+	statuses, err := s.statusRepo.ListByWorkspace(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -1040,7 +1028,7 @@ func (s *GitHubService) isTerminalStatus(ctx context.Context, issue *domain.Issu
 
 func (s *GitHubService) issueStatusCategory(ctx context.Context, issue *domain.Issue) domain.StatusCategory {
 	if issue.StatusID != nil {
-		status, err := s.teamStatusRepo.GetByID(ctx, *issue.StatusID)
+		status, err := s.statusRepo.GetByID(ctx, *issue.StatusID)
 		if err == nil && status != nil {
 			return status.Category
 		}

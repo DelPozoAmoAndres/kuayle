@@ -4,9 +4,8 @@
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
 	import { createView } from '$lib/api/views';
-	import type { Team } from '$lib/types/team';
 	import type { ViewFilter, ViewScope } from '$lib/types/view';
-	import { Bookmark, Building2, Check, CircleUser, SquareUser } from 'lucide-svelte';
+	import { Bookmark, Building2, Check, CircleUser } from 'lucide-svelte';
 	import { appToast } from '$lib/features/toast/toast';
 	import { m } from '$lib/paraglide/messages.js';
 	import { getLocale, setLocale } from '$lib/paraglide/runtime.js';
@@ -16,16 +15,12 @@
 		showTrigger = true,
 		filters,
 		slug,
-		teams = [],
-		defaultTeamId,
 		defaultScope = 'personal'
 	}: {
 		open?: boolean;
 		showTrigger?: boolean;
 		filters: ViewFilter;
 		slug: string;
-		teams?: Team[];
-		defaultTeamId?: string;
 		defaultScope?: ViewScope;
 	} = $props();
 
@@ -50,49 +45,25 @@
 			label: m['sharedComponents.save_view.scope_workspace'](),
 			description: m['sharedComponents.save_view.scope_workspace_desc'](),
 			icon: Building2
-		},
-		{
-			value: 'team',
-			label: m['sharedComponents.save_view.scope_team'](),
-			description: m['sharedComponents.save_view.scope_team_desc'](),
-			icon: SquareUser
 		}
 	]);
-
-	let currentTeam = $derived(teams.find((team) => team.id === defaultTeamId));
-	let visibleScopeOptions = $derived(scopeOptions.filter((option) => option.value !== 'team' || defaultTeamId));
 
 	$effect(() => {
 		if (open) {
 			name = '';
 			description = '';
-			scope = defaultScope === 'team' && !defaultTeamId ? 'personal' : defaultScope;
+			scope = defaultScope;
 		}
-	});
-
-	$effect(() => {
-		if (scope === 'team' && !defaultTeamId) scope = 'personal';
 	});
 
 	async function handleSubmit(e: Event) {
 		e.preventDefault();
 		if (!name.trim()) return;
-		if (scope === 'team' && !defaultTeamId) {
-			appToast.error(m['sharedComponents.save_view.toast.team_only']());
-			return;
-		}
 
 		const nextFilters: ViewFilter = {
 			...filters,
-			...(defaultTeamId ? { team: defaultTeamId } : {}),
 			view_scope: scope
 		};
-		if (scope === 'team') {
-			nextFilters.team = defaultTeamId;
-			nextFilters.view_team = defaultTeamId;
-		} else {
-			delete nextFilters.view_team;
-		}
 
 		try {
 			await createView(slug, {
@@ -154,7 +125,7 @@
 				<div class="space-y-2">
 					<Label class="text-xs text-[var(--color-text-secondary)]">{m['sharedComponents.save_view.visibility']()}</Label>
 					<div class="grid gap-2">
-						{#each visibleScopeOptions as option}
+						{#each scopeOptions as option}
 							{@const Icon = option.icon}
 							<button
 								type="button"
@@ -167,7 +138,7 @@
 								<span class="min-w-0 flex-1">
 									<span class="block text-sm font-medium text-[var(--color-text-primary)]">{option.label}</span>
 									<span class="block text-xs text-[var(--color-text-tertiary)]">
-										{option.value === 'team' && currentTeam ? m['sharedComponents.save_view.shared_with_team']({ teamName: currentTeam.name }) : option.description}
+										{option.description}
 									</span>
 								</span>
 								{#if scope === option.value}
@@ -177,15 +148,6 @@
 						{/each}
 					</div>
 				</div>
-
-				{#if scope === 'team' && currentTeam}
-					<div
-						class="flex items-center gap-2 rounded-md border border-[var(--app-border)] bg-[var(--color-bg)] px-3 py-2 text-xs text-[var(--color-text-secondary)]"
-					>
-						<SquareUser size={14} class="shrink-0 text-[var(--color-text-tertiary)]" />
-						<span>{m['sharedComponents.save_view.saved_to_team']({ teamName: currentTeam.name })}</span>
-					</div>
-				{/if}
 			</div>
 
 			<div class="flex justify-end gap-2 border-t border-[var(--app-border)] px-5 py-3">

@@ -4,19 +4,16 @@
 	import { goto } from '$app/navigation';
 	import { getProject, updateProject, deleteProject } from '$lib/api/projects';
 	import { getWorkspace } from '$lib/api/workspaces';
+	import { hasPermission } from '$lib/security/permissions';
+	import type { Role } from '$lib/security/roles';
 	import { issuesState } from '$lib/features/issues/issues.state.svelte';
-	import { teamStatusesState } from '$lib/features/issues/team-statuses.state.svelte';
-	import { listCycles } from '$lib/api/cycles';
-	import { listTeams } from '$lib/api/teams';
+	import { statusesState } from '$lib/features/issues/statuses.state.svelte';
 	import type { Project, ProjectStatus } from '$lib/types/project';
-	import type { Cycle } from '$lib/types/cycle';
-	import type { Team } from '$lib/types/team';
 	import IssueRow from '$lib/features/issues/IssueRow.svelte';
 	import IssueListLoadMore from '$lib/features/issues/IssueListLoadMore.svelte';
 	import IssueDetail from '$lib/features/issues/IssueDetail.svelte';
 	import GanttChart from '$lib/features/projects/GanttChart.svelte';
 	import EmptyState from '$lib/components/shared/EmptyState.svelte';
-	import CycleProgress from '$lib/features/cycles/CycleProgress.svelte';
 	import DatePickerPopover from '$lib/components/shared/DatePickerPopover.svelte';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
@@ -43,19 +40,15 @@
 		List,
 		BarChart3,
 		ChevronRight,
-		SquareUser,
 		Box,
 		Settings2
 	} from 'lucide-svelte';
-	import { sidebarState } from '$lib/features/layout/sidebar.state.svelte';
 	import SidebarToggle from '$lib/components/layout/SidebarToggle.svelte';
 
 	const slug = $derived(page.params.workspaceSlug ?? '');
 	const projectId = $derived(page.params.projectId ?? '');
 
 	let project = $state<Project | null>(null);
-	let teams = $state<Team[]>([]);
-	let cycles = $state<Cycle[]>([]);
 	let loading = $state(true);
 	let statusOpen = $state(false);
 	let actionsOpen = $state(false);
@@ -72,7 +65,6 @@
 	let canManageDevelopment = $state(false);
 	let developmentRequestVersion = 0;
 	let developmentSaveVersion = 0;
-	const projectTeam = $derived(project?.team_id ? teams.find(t => t.id === project!.team_id) : null);
 
 	const STATUS_OPTIONS: { value: ProjectStatus; label: string; icon: typeof Circle }[] = [
 		{ value: 'planned', label: m['projects.status.planned'](), icon: Circle },
@@ -89,7 +81,7 @@
 		try {
 			const workspace = await getWorkspace(s);
 			if (!isCurrentDevelopmentScope(s, pid, version)) return;
-			canManageDevelopment = workspace.current_user_role === 'owner' || workspace.current_user_role === 'admin';
+			canManageDevelopment = hasPermission(workspace.current_user_role as Role, 'project:manage');
 			const [github, developmentSetting, availableEnvironments] = await Promise.all([
 				getGitHubStatus(s), getDevMachineScopeSetting(s, 'project', pid), listDevMachineEnvironments(s)
 			]);
@@ -112,17 +104,7 @@
 		try {
 			project = await getProject(s, pid);
 			await issuesState.load(s, viewMode === 'gantt' ? { project: pid, per_page: '200' } : { project: pid });
-			const firstTeamId = issuesState.issues[0]?.team_id;
-			if (firstTeamId) {
-				teamStatusesState.load(s, firstTeamId);
-			}
-			teams = await listTeams(s);
-			const allCycles: Cycle[] = [];
-			for (const team of teams) {
-				const tc = await listCycles(s, team.id);
-				allCycles.push(...tc);
-			}
-			cycles = allCycles;
+			await statusesState.load(s);
 		} catch {
 			appToast.error(m['projects.toast.not_found']());
 			goto(`/${slug}/projects`);
@@ -247,18 +229,11 @@
 			<div class="flex items-center gap-3">
 				<SidebarToggle />
 				<nav class="flex items-center gap-1.5 text-sm">
-					{#if projectTeam}
-						<a href="/{slug}/teams/{projectTeam.id}" class="flex items-center gap-1.5 text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]">
-							<SquareUser size={14} class="shrink-0" style="color: {sidebarState.getTeamColor(projectTeam.id)}" />
-							{projectTeam.name}
-						</a>
-						<ChevronRight size={12} class="shrink-0 text-[var(--color-text-tertiary)]" />
-						<a href="/{slug}/teams/{projectTeam.id}/projects" class="flex items-center gap-1.5 text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]">
-							<Box size={14} class="shrink-0" />
-							{m['projects.title']()}
-						</a>
-						<ChevronRight size={12} class="shrink-0 text-[var(--color-text-tertiary)]" />
-					{/if}
+					<a href="/{slug}/projects" class="flex items-center gap-1.5 text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)]">
+						<Box size={14} class="shrink-0" />
+						{m['projects.title']()}
+					</a>
+					<ChevronRight size={12} class="shrink-0 text-[var(--color-text-tertiary)]" />
 					<span class="font-medium text-[var(--color-text-primary)]">{project.name}</span>
 				</nav>
 				<Popover.Root bind:open={statusOpen}>
@@ -349,7 +324,17 @@
 			{/if}
 			{#if project.progress && project.progress.total > 0}
 				<div class="mt-3 w-64">
-					<CycleProgress progress={project.progress} />
+					<div class="flex items-center gap-3">
+						<div class="relative h-1.5 flex-1 overflow-hidden rounded-full bg-[var(--color-bg-tertiary)]">
+							<div
+								class="absolute left-0 top-0 h-full rounded-full bg-[var(--color-success)]"
+								style="width: {project.progress.total > 0 ? ((project.progress.completed + project.progress.cancelled) / project.progress.total) * 100 : 0}%"
+							></div>
+						</div>
+						<span class="shrink-0 text-xs tabular-nums text-[var(--color-text-tertiary)]">
+							{project.progress.total > 0 ? Math.round(((project.progress.completed + project.progress.cancelled) / project.progress.total) * 100) : 0}%
+						</span>
+					</div>
 				</div>
 			{/if}
 		</div>
@@ -374,7 +359,6 @@
 				{#if !issuesState.loading}
 					<GanttChart
 						issues={issuesState.issues}
-						{cycles}
 						onissueclick={(i) => goto(`/${slug}/issue/${i.identifier}`)}
 					/>
 				{/if}

@@ -3,7 +3,7 @@ package dto
 import "time"
 
 type CreateFavoriteRequest struct {
-	EntityType string `json:"entity_type" validate:"required,oneof=project view team cycle label"`
+	EntityType string `json:"entity_type" validate:"required,oneof=project view cycle label"`
 	EntityID   string `json:"entity_id" validate:"required,uuid"`
 }
 

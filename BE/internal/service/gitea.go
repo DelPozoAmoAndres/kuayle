@@ -39,40 +39,70 @@ func IsSyncingFromGitea(ctx context.Context) bool {
 	return v
 }
 
+// commentFromGiteaService is the subset of CommentService used to apply
+// comments that arrive from a Gitea webhook. It is injected through
+// SetCommentService to avoid an initialization cycle.
+type commentFromGiteaService interface {
+	CreateFromGitea(ctx context.Context, issue *domain.Issue, comment *domain.Comment) error
+	UpdateFromGitea(ctx context.Context, comment *domain.Comment, body string) error
+	DeleteFromGitea(ctx context.Context, comment *domain.Comment) error
+}
+
 type GiteaService struct {
-	gtRepo         *repository.GiteaRepository
-	issueRepo      repository.IssueRepo
-	teamRepo       repository.TeamRepo
-	teamStatusRepo repository.TeamStatusRepo
-	historyRepo    repository.IssueHistoryRepo
-	projectRepo    *repository.ProjectRepository
-	encryptionKey  []byte
-	hub            *realtime.Hub
-	frontendURL    string
+	gtRepo        repository.GiteaRepo
+	issueRepo     repository.IssueRepo
+	statusRepo    repository.StatusRepo
+	historyRepo   repository.IssueHistoryRepo
+	projectRepo   *repository.ProjectRepository
+	userRepo      repository.UserRepo
+	commentRepo   repository.CommentRepo
+	commentSvc    commentFromGiteaService
+	encryptionKey []byte
+	hub           *realtime.Hub
+	frontendURL   string
 }
 
 func NewGiteaService(
-	gtRepo *repository.GiteaRepository,
+	gtRepo repository.GiteaRepo,
 	issueRepo repository.IssueRepo,
-	teamRepo repository.TeamRepo,
-	teamStatusRepo repository.TeamStatusRepo,
+	statusRepo repository.StatusRepo,
 	historyRepo repository.IssueHistoryRepo,
 	projectRepo *repository.ProjectRepository,
+	userRepo repository.UserRepo,
+	commentRepo repository.CommentRepo,
 	encryptionKey []byte,
 	hub *realtime.Hub,
 	frontendURL string,
 ) *GiteaService {
 	return &GiteaService{
-		gtRepo:         gtRepo,
-		issueRepo:      issueRepo,
-		teamRepo:       teamRepo,
-		teamStatusRepo: teamStatusRepo,
-		historyRepo:    historyRepo,
-		projectRepo:    projectRepo,
-		encryptionKey:  encryptionKey,
-		hub:            hub,
-		frontendURL:    frontendURL,
+		gtRepo:        gtRepo,
+		issueRepo:     issueRepo,
+		statusRepo:    statusRepo,
+		historyRepo:   historyRepo,
+		projectRepo:   projectRepo,
+		userRepo:      userRepo,
+		commentRepo:   commentRepo,
+		encryptionKey: encryptionKey,
+		hub:           hub,
+		frontendURL:   frontendURL,
 	}
+}
+
+// SetCommentService wires the comment service used to persist comments that
+// originate in Gitea (setter avoids an initialization cycle).
+func (s *GiteaService) SetCommentService(commentSvc commentFromGiteaService) {
+	s.commentSvc = commentSvc
+}
+
+// HasGiteaInstance reports whether the workspace has a connected Gitea
+// instance. It is used to decide whether commenting requires a linked Gitea
+// account.
+func (s *GiteaService) HasGiteaInstance(ctx context.Context, workspaceID uuid.UUID) (bool, error) {
+	inst, err := s.gtRepo.GetInstanceByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return false, err
+	}
+	return inst != nil, nil
 }
 
 // Connect verifies the PAT and stores the instance.
@@ -309,18 +339,13 @@ func (s *GiteaService) Disconnect(ctx context.Context, workspaceID uuid.UUID) er
 // VerifyWebhookSignature verifies the Gitea webhook HMAC-SHA256 signature.
 // If no webhook secret is configured, skips verification (allows unsigned webhooks).
 func (s *GiteaService) VerifyWebhookSignature(ctx context.Context, workspaceID uuid.UUID, payload []byte, signature string) bool {
-	// If no signature header, check if we have a secret configured
-	if signature == "" {
-		oauthCfg, _ := s.gtRepo.GetOAuthConfigByWorkspace(ctx, workspaceID)
-		// No secret configured = allow unsigned webhooks
-		if oauthCfg == nil || oauthCfg.WebhookSecret == "" {
-			return true
-		}
-		return false
-	}
-
 	oauthCfg, err := s.gtRepo.GetOAuthConfigByWorkspace(ctx, workspaceID)
-	if err != nil || oauthCfg == nil {
+	// No secret configured on our side = skip verification.
+	if err != nil || oauthCfg == nil || oauthCfg.WebhookSecret == "" {
+		return true
+	}
+	// A secret is configured: the webhook must be signed.
+	if signature == "" {
 		return false
 	}
 
@@ -387,6 +412,8 @@ func (s *GiteaService) HandleWebhookEvent(ctx context.Context, workspaceID uuid.
 		return s.processPushEvent(ctx, workspaceID, payload)
 	case "issues":
 		return s.processIssuesEvent(ctx, workspaceID, payload)
+	case "issue_comment", "comment":
+		return s.processIssueCommentEvent(ctx, workspaceID, payload)
 	default:
 		return nil
 	}
@@ -699,11 +726,14 @@ func (s *GiteaService) syncIssueFromGiteaOpen(ctx context.Context, workspaceID u
 		return nil
 	}
 
-	// Find or create a "Gitea" team for issues coming from Gitea
-	team, err := s.findOrCreateGiteaTeam(ctx, workspaceID)
+	// Find the project linked to this Gitea repo (by name match), creating it
+	// when it does not exist yet.
+	project, err := s.findOrCreateProjectForRepo(ctx, workspaceID, repo.FullName)
 	if err != nil {
-		return fmt.Errorf("finding gitea team: %w", err)
+		return fmt.Errorf("resolving project for gitea repo: %w", err)
 	}
+
+	prefix := projectPrefix(project.Name)
 
 	tx, err := s.issueRepo.BeginTx(ctx)
 	if err != nil {
@@ -711,49 +741,35 @@ func (s *GiteaService) syncIssueFromGiteaOpen(ctx context.Context, workspaceID u
 	}
 	defer tx.Rollback()
 
-	number, err := s.issueRepo.NextNumber(ctx, tx, &team.ID)
+	number, err := s.issueRepo.NextNumber(ctx, tx, workspaceID, prefix)
 	if err != nil {
 		return err
 	}
 
-	identifier := fmt.Sprintf("%s-%d", team.Key, number)
+	identifier := fmt.Sprintf("%s-%d", prefix, number)
 
 	// Use the user who connected Gitea as the creator
 	creatorID := inst.InstalledBy
 
-	// Find the project linked to this Gitea repo (by name match)
-	var projectID *uuid.UUID
-	projects, _ := s.projectRepo.ListByWorkspace(ctx, workspaceID)
-	for i := range projects {
-		if projects[i].Name == repo.FullName {
-			projectID = &projects[i].ID
-			break
-		}
-	}
-
 	issue := &domain.Issue{
-		ID:               uuid.New(),
-		WorkspaceID:      workspaceID,
-		TeamID:           &team.ID,
-		ProjectID:        projectID,
-		Number:           number,
-		Identifier:       identifier,
-		Title:            event.Issue.Title,
-		Description:      &event.Issue.Body,
-		Status:           domain.IssueStatusTodo,
-		CreatorID:        creatorID,
-		SortOrder:        -float64(number) * 1000,
-		GiteaIssueIndex:  &event.Issue.Number,
-		GiteaInstanceID:  &inst.ID,
-		Triaged:          team.TriageEnabled,
+		ID:              uuid.New(),
+		WorkspaceID:     workspaceID,
+		ProjectID:       &project.ID,
+		Number:          number,
+		Identifier:      identifier,
+		Title:           event.Issue.Title,
+		Description:     &event.Issue.Body,
+		Status:          domain.IssueStatusTodo,
+		CreatorID:       creatorID,
+		SortOrder:       -float64(number) * 1000,
+		GiteaIssueIndex: &event.Issue.Number,
+		GiteaInstanceID: &inst.ID,
+		Triaged:         true,
 	}
 
-	// Resolve status_id for the team
-	if teamID != nil {
-		ts, err := s.teamStatusRepo.GetByTeamAndSlug(ctx, *teamID, string(domain.IssueStatusTodo))
-		if err == nil && ts != nil {
-			issue.StatusID = &ts.ID
-		}
+	// Resolve status_id against the workspace statuses
+	if ts, err := s.statusRepo.GetByWorkspaceAndSlug(ctx, workspaceID, string(domain.IssueStatusTodo)); err == nil && ts != nil {
+		issue.StatusID = &ts.ID
 	}
 
 	if err := s.issueRepo.Create(ctx, tx, issue); err != nil {
@@ -800,11 +816,8 @@ func (s *GiteaService) syncIssueFromGiteaClose(ctx context.Context, workspaceID 
 	}
 
 	issue.Status = domain.IssueStatusDone
-	if issue.TeamID != nil {
-		ts, err := s.teamStatusRepo.GetByTeamAndSlug(ctx, *issue.TeamID, string(domain.IssueStatusDone))
-		if err == nil && ts != nil {
-			issue.StatusID = &ts.ID
-		}
+	if ts, err := s.statusRepo.GetByWorkspaceAndSlug(ctx, workspaceID, string(domain.IssueStatusDone)); err == nil && ts != nil {
+		issue.StatusID = &ts.ID
 	}
 
 	if err := s.issueRepo.Update(ctx, issue); err != nil {
@@ -827,11 +840,8 @@ func (s *GiteaService) syncIssueFromGiteaReopen(ctx context.Context, workspaceID
 	}
 
 	issue.Status = domain.IssueStatusTodo
-	if issue.TeamID != nil {
-		ts, err := s.teamStatusRepo.GetByTeamAndSlug(ctx, *issue.TeamID, string(domain.IssueStatusTodo))
-		if err == nil && ts != nil {
-			issue.StatusID = &ts.ID
-		}
+	if ts, err := s.statusRepo.GetByWorkspaceAndSlug(ctx, workspaceID, string(domain.IssueStatusTodo)); err == nil && ts != nil {
+		issue.StatusID = &ts.ID
 	}
 
 	if err := s.issueRepo.Update(ctx, issue); err != nil {
@@ -845,6 +855,111 @@ func (s *GiteaService) syncIssueFromGiteaReopen(ctx context.Context, workspaceID
 	})
 	s.broadcastAppRefresh(workspaceID, "issues")
 	return nil
+}
+
+// --- Comment Webhook Processing ---
+
+// giteaWebhookIssueComment mirrors the Gitea issue_comment webhook payload.
+type giteaWebhookIssueComment struct {
+	Action  string `json:"action"`
+	Comment struct {
+		ID     int64  `json:"id"`
+		Body   string `json:"body"`
+		User   struct {
+			Login     string `json:"login"`
+			AvatarURL string `json:"avatar_url"`
+		} `json:"user"`
+		CreatedAt *time.Time `json:"created_at"`
+		HTMLURL   string     `json:"html_url"`
+	} `json:"comment"`
+	Issue struct {
+		Number int64 `json:"number"`
+	} `json:"issue"`
+	Repository struct {
+		ID       int64  `json:"id"`
+		FullName string `json:"full_name"`
+	} `json:"repository"`
+	Sender struct {
+		Login string `json:"login"`
+	} `json:"sender"`
+}
+
+// processIssueCommentEvent keeps comments created, edited or deleted in Gitea
+// in sync with the local copy.
+func (s *GiteaService) processIssueCommentEvent(ctx context.Context, workspaceID uuid.UUID, payload []byte) error {
+	var event giteaWebhookIssueComment
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return fmt.Errorf("unmarshaling issue_comment event: %w", err)
+	}
+	if s.commentSvc == nil || s.commentRepo == nil {
+		return nil
+	}
+
+	inst, err := s.gtRepo.GetInstanceByWorkspace(ctx, workspaceID)
+	if err != nil || inst == nil {
+		return nil
+	}
+
+	issue, err := s.issueRepo.GetByGiteaIssueIndex(ctx, workspaceID, inst.ID, event.Issue.Number)
+	if err != nil || issue == nil {
+		return nil
+	}
+
+	// Flag context to prevent infinite sync loops
+	ctx = SyncingFromGitea(ctx)
+
+	switch event.Action {
+	case "created":
+		// Idempotency: ignore comments we already imported.
+		existing, err := s.commentRepo.GetByGiteaCommentID(ctx, event.Comment.ID)
+		if err != nil || existing != nil {
+			return nil
+		}
+
+		var userID *uuid.UUID
+		if s.userRepo != nil && event.Comment.User.Login != "" {
+			if user, err := s.userRepo.GetWorkspaceMemberByGiteaLogin(ctx, workspaceID, event.Comment.User.Login); err == nil && user != nil {
+				id := user.ID
+				userID = &id
+			}
+		}
+
+		// The Gitea author may have no Kuayle account: keep the login and
+		// avatar so the UI can still render it.
+		login := event.Comment.User.Login
+		avatarURL := event.Comment.User.AvatarURL
+		giteaCommentID := event.Comment.ID
+
+		comment := &domain.Comment{
+			ID:              uuid.New(),
+			IssueID:         issue.ID,
+			UserID:          userID,
+			AuthorLogin:     &login,
+			GiteaCommentID:  &giteaCommentID,
+			Body:            event.Comment.Body,
+		}
+		if avatarURL != "" {
+			comment.AuthorAvatarURL = &avatarURL
+		}
+		return s.commentSvc.CreateFromGitea(ctx, issue, comment)
+
+	case "edited":
+		comment, err := s.commentRepo.GetByGiteaCommentID(ctx, event.Comment.ID)
+		if err != nil || comment == nil {
+			return nil
+		}
+		return s.commentSvc.UpdateFromGitea(ctx, comment, event.Comment.Body)
+
+	case "deleted":
+		comment, err := s.commentRepo.GetByGiteaCommentID(ctx, event.Comment.ID)
+		if err != nil || comment == nil {
+			return nil
+		}
+		return s.commentSvc.DeleteFromGitea(ctx, comment)
+
+	default:
+		return nil
+	}
 }
 
 // --- Gitea Sync Helpers ---
@@ -1014,6 +1129,81 @@ func (s *GiteaService) SyncIssueReopenToGitea(ctx context.Context, issue *domain
 	return nil
 }
 
+// SyncCommentToGitea creates a comment in Gitea when a comment is created in
+// Kuayle, storing the returned Gitea comment ID so it can be edited or deleted
+// later. Like the issue sync, it is a no-op while processing a Gitea webhook.
+func (s *GiteaService) SyncCommentToGitea(ctx context.Context, issue *domain.Issue, comment *domain.Comment) error {
+	if IsSyncingFromGitea(ctx) {
+		return nil
+	}
+	if issue == nil || issue.GiteaIssueIndex == nil {
+		return nil
+	}
+
+	repo, inst, err := s.getRepoForIssue(ctx, issue)
+	if err != nil {
+		return nil // silently skip when the workspace is not linked
+	}
+	owner := strings.SplitN(repo.FullName, "/", 2)
+	if len(owner) != 2 {
+		return nil
+	}
+	token, err := s.decryptToken(inst.AccessToken)
+	if err != nil {
+		return nil
+	}
+
+	client := gt.NewClient(inst.InstanceURL, token)
+	giteaComment, err := client.CreateIssueComment(owner[0], owner[1], int(*issue.GiteaIssueIndex), comment.Body)
+	if err != nil {
+		log.WithError(err).WithField("comment_id", comment.ID).Warn("failed to create comment in Gitea")
+		return nil
+	}
+
+	giteaCommentID := giteaComment.ID
+	comment.GiteaCommentID = &giteaCommentID
+	if s.commentRepo != nil {
+		if err := s.commentRepo.SetGiteaCommentID(ctx, comment.ID, giteaCommentID); err != nil {
+			log.WithError(err).WithField("comment_id", comment.ID).Warn("failed to store Gitea comment ID")
+		}
+	}
+	log.WithField("gitea_comment_id", giteaCommentID).Info("created comment in Gitea")
+	return nil
+}
+
+// SyncCommentDeleteToGitea deletes a comment in Gitea when it is deleted in
+// Kuayle. It only acts on comments that were mirrored to Gitea.
+func (s *GiteaService) SyncCommentDeleteToGitea(ctx context.Context, issue *domain.Issue, comment *domain.Comment) error {
+	if IsSyncingFromGitea(ctx) {
+		return nil
+	}
+	if issue == nil || issue.GiteaIssueIndex == nil {
+		return nil
+	}
+	if comment == nil || comment.GiteaCommentID == nil {
+		return nil
+	}
+
+	repo, inst, err := s.getRepoForIssue(ctx, issue)
+	if err != nil {
+		return nil
+	}
+	owner := strings.SplitN(repo.FullName, "/", 2)
+	if len(owner) != 2 {
+		return nil
+	}
+	token, err := s.decryptToken(inst.AccessToken)
+	if err != nil {
+		return nil
+	}
+
+	client := gt.NewClient(inst.InstanceURL, token)
+	if err := client.DeleteIssueComment(owner[0], owner[1], *comment.GiteaCommentID); err != nil {
+		log.WithError(err).WithField("comment_id", comment.ID).Warn("failed to delete comment in Gitea")
+	}
+	return nil
+}
+
 // --- Issue Linking ---
 
 func (s *GiteaService) resolveIssueFromRef(ctx context.Context, workspaceID uuid.UUID, texts ...string) *domain.Issue {
@@ -1052,11 +1242,8 @@ func (s *GiteaService) applyAutoTransition(ctx context.Context, workspaceID uuid
 	if rule.TargetStatusID != nil {
 		issue.StatusID = rule.TargetStatusID
 	} else {
-		if issue.TeamID != nil {
-			ts, err := s.teamStatusRepo.GetByTeamAndSlug(ctx, *issue.TeamID, newStatus)
-			if err == nil && ts != nil {
-				issue.StatusID = &ts.ID
-			}
+		if ts, err := s.statusRepo.GetByWorkspaceAndSlug(ctx, workspaceID, newStatus); err == nil && ts != nil {
+			issue.StatusID = &ts.ID
 		}
 	}
 
@@ -1075,17 +1262,16 @@ func (s *GiteaService) applyAutoTransition(ctx context.Context, workspaceID uuid
 }
 
 func (s *GiteaService) applyStatusAutomation(ctx context.Context, workspaceID uuid.UUID, issue *domain.Issue, visited map[uuid.UUID]bool) {
-	if issue == nil || visited[issue.ID] || s.teamRepo == nil {
+	if issue == nil || visited[issue.ID] {
 		return
 	}
 	visited[issue.ID] = true
 
+	// Sub-issue auto-close used to be gated by a per-team setting; with teams
+	// removed it now applies to every completed issue.
 	category := s.issueStatusCategory(ctx, issue)
-	if category == domain.StatusCategoryCompleted && issue.TeamID != nil {
-		team, err := s.teamRepo.GetByID(ctx, *issue.TeamID)
-		if err == nil && team != nil && team.SubIssueAutoCloseEnabled {
-			s.autoCloseSubIssues(ctx, workspaceID, issue.ID, visited)
-		}
+	if category == domain.StatusCategoryCompleted {
+		s.autoCloseSubIssues(ctx, workspaceID, issue.ID, visited)
 	}
 	if issue.ParentID != nil {
 		s.maybeAutoCloseParent(ctx, workspaceID, *issue.ParentID, visited)
@@ -1094,14 +1280,7 @@ func (s *GiteaService) applyStatusAutomation(ctx context.Context, workspaceID uu
 
 func (s *GiteaService) maybeAutoCloseParent(ctx context.Context, workspaceID, parentID uuid.UUID, visited map[uuid.UUID]bool) {
 	parent, err := s.issueRepo.GetByID(ctx, parentID)
-	if err != nil || parent == nil || parent.WorkspaceID != workspaceID || visited[parent.ID] || s.teamRepo == nil {
-		return
-	}
-	if parent.TeamID == nil {
-		return
-	}
-	team, err := s.teamRepo.GetByID(ctx, *parent.TeamID)
-	if err != nil || team == nil || !team.ParentAutoCloseEnabled {
+	if err != nil || parent == nil || parent.WorkspaceID != workspaceID || visited[parent.ID] {
 		return
 	}
 	total, done, err := s.issueRepo.CountSubIssues(ctx, parent.ID)
@@ -1126,10 +1305,10 @@ func (s *GiteaService) autoCloseSubIssues(ctx context.Context, workspaceID, pare
 }
 
 func (s *GiteaService) moveIssueToCompleted(ctx context.Context, workspaceID uuid.UUID, issue *domain.Issue, visited map[uuid.UUID]bool) {
-	if issue == nil || issue.TeamID == nil || s.isTerminalStatus(ctx, issue) {
+	if issue == nil || s.isTerminalStatus(ctx, issue) {
 		return
 	}
-	completedStatus, err := s.completedStatusForTeam(ctx, *issue.TeamID)
+	completedStatus, err := s.completedStatus(ctx, workspaceID)
 	if err != nil || completedStatus == nil {
 		return
 	}
@@ -1147,12 +1326,14 @@ func (s *GiteaService) moveIssueToCompleted(ctx context.Context, workspaceID uui
 	s.applyStatusAutomation(ctx, workspaceID, issue, visited)
 }
 
-func (s *GiteaService) completedStatusForTeam(ctx context.Context, teamID uuid.UUID) (*domain.TeamStatus, error) {
-	status, err := s.teamStatusRepo.GetByTeamAndSlug(ctx, teamID, string(domain.IssueStatusDone))
+// completedStatus returns the status used to close issues for a workspace: the
+// "done" status, or the first status whose category is "completed".
+func (s *GiteaService) completedStatus(ctx context.Context, workspaceID uuid.UUID) (*domain.WorkspaceStatus, error) {
+	status, err := s.statusRepo.GetByWorkspaceAndSlug(ctx, workspaceID, string(domain.IssueStatusDone))
 	if err == nil && status != nil {
 		return status, nil
 	}
-	statuses, err := s.teamStatusRepo.ListByTeam(ctx, teamID)
+	statuses, err := s.statusRepo.ListByWorkspace(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -1171,7 +1352,7 @@ func (s *GiteaService) isTerminalStatus(ctx context.Context, issue *domain.Issue
 
 func (s *GiteaService) issueStatusCategory(ctx context.Context, issue *domain.Issue) domain.StatusCategory {
 	if issue.StatusID != nil {
-		status, err := s.teamStatusRepo.GetByID(ctx, *issue.StatusID)
+		status, err := s.statusRepo.GetByID(ctx, *issue.StatusID)
 		if err == nil && status != nil {
 			return status.Category
 		}
@@ -1307,6 +1488,31 @@ func (s *GiteaService) UpdateAutoTransitions(ctx context.Context, workspaceID uu
 
 func (s *GiteaService) decryptToken(encToken string) (string, error) {
 	return crypto.Decrypt(encToken, s.encryptionKey)
+}
+
+// findOrCreateProjectForRepo returns the workspace project whose name matches
+// the Gitea repository full name, creating it when it does not exist yet.
+func (s *GiteaService) findOrCreateProjectForRepo(ctx context.Context, workspaceID uuid.UUID, fullName string) (*domain.Project, error) {
+	projects, err := s.projectRepo.ListByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range projects {
+		if projects[i].Name == fullName {
+			return &projects[i], nil
+		}
+	}
+
+	project := &domain.Project{
+		ID:          uuid.New(),
+		WorkspaceID: workspaceID,
+		Name:        fullName,
+		Status:      domain.ProjectStatusPlanned,
+	}
+	if err := s.projectRepo.Create(ctx, project); err != nil {
+		return nil, err
+	}
+	return project, nil
 }
 
 // ResolveWorkspaceFromPayload extracts the repository ID from a webhook payload

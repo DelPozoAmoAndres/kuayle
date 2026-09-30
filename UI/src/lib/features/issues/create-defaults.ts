@@ -1,14 +1,12 @@
 import type { IssuePriority } from '$lib/types/issue';
 
 export type IssueCreateDefaults = {
-	teamId?: string;
+	projectId?: string | null;
 	statusId?: string;
 	priority?: IssuePriority;
-	projectId?: string | null;
 	assigneeIds?: string[];
 	labelIds?: string[];
 	dueDate?: string | null;
-	cycleId?: string | null;
 };
 
 const DEFAULTS_STORAGE_KEY = 'kuayle-issue-create-defaults';

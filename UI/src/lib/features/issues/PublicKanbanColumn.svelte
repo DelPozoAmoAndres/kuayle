@@ -3,7 +3,7 @@
 	import type { IssuePriority } from '$lib/types/issue';
 	import IssueStatusIcon from './IssueStatusIcon.svelte';
 	import IssuePriorityIcon from './IssuePriorityIcon.svelte';
-	import type { StatusCategory } from '$lib/types/team-status';
+	import type { StatusCategory } from '$lib/types/status';
 
 	let {
 		status,

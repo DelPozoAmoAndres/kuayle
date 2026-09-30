@@ -35,23 +35,20 @@ func (r *IssueRepository) Create(ctx context.Context, tx *sqlx.Tx, issue *domain
 	).Scan(&issue.CreatedAt, &issue.UpdatedAt)
 }
 
-func (r *IssueRepository) NextNumber(ctx context.Context, tx *sqlx.Tx, teamID *uuid.UUID) (int, error) {
+// NextNumber returns the next issue number for a (workspace, prefix) pair.
+// The spec sequence is: SELECT COALESCE(MAX(number),0)+1 FROM issues WHERE
+// workspace_id=$1 AND identifier_text LIKE $2 || '-%', guarded by an advisory
+// lock keyed on workspaceID:prefix.
+func (r *IssueRepository) NextNumber(ctx context.Context, tx *sqlx.Tx, workspaceID uuid.UUID, prefix string) (int, error) {
 	var num int
-	if teamID != nil {
-		// Advisory lock per team to guarantee sequential numbering
-		_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1::text))`, *teamID)
-		if err != nil {
-			return 0, err
-		}
-		err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(number), 0) + 1 FROM issues WHERE team_id = $1`, *teamID).Scan(&num)
-		return num, err
-	}
-	// No team: use a workspace-global advisory lock and count issues with NULL team_id
-	_, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext('noteam'))`)
-	if err != nil {
+	lockKey := workspaceID.String() + ":" + prefix
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtext($1::text))`, lockKey); err != nil {
 		return 0, err
 	}
-	err = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(number), 0) + 1 FROM issues WHERE team_id IS NULL`).Scan(&num)
+	err := tx.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(number), 0) + 1 FROM issues WHERE workspace_id = $1 AND identifier_text LIKE $2 || '-%'`,
+		workspaceID, prefix,
+	).Scan(&num)
 	return num, err
 }
 
@@ -142,28 +139,12 @@ func (r *IssueRepository) List(ctx context.Context, workspaceID uuid.UUID, param
 		where = append(where, "i.creator_id = :creator_id")
 		args["creator_id"] = params.CreatorID
 	}
-	if params.TeamID != "" {
-		if params.TeamID == "none" {
-			where = append(where, "i.team_id IS NULL")
-		} else {
-			where = append(where, "i.team_id = :team_id")
-			args["team_id"] = params.TeamID
-		}
-	}
 	if params.ProjectID != "" {
 		if params.ProjectID == "none" {
 			where = append(where, "i.project_id IS NULL")
 		} else {
 			where = append(where, "i.project_id = :project_id")
 			args["project_id"] = params.ProjectID
-		}
-	}
-	if params.CycleID != "" {
-		if params.CycleID == "none" {
-			where = append(where, "i.cycle_id IS NULL")
-		} else {
-			where = append(where, "i.cycle_id = :cycle_id")
-			args["cycle_id"] = params.CycleID
 		}
 	}
 	if params.LabelID != "" {
@@ -199,16 +180,6 @@ func (r *IssueRepository) List(ctx context.Context, workspaceID uuid.UUID, param
 				AND (p.name ILIKE :search OR p.description ILIKE :search OR p.status ILIKE :search)
 			)`,
 			`EXISTS (
-				SELECT 1 FROM cycles c
-				WHERE c.id = i.cycle_id
-				AND (
-					c.name ILIKE :search OR c.status ILIKE :search OR c.description ILIKE :search
-					OR c.goals ILIKE :search OR c.retrospective ILIKE :search
-					OR TO_CHAR(c.start_date, 'YYYY-MM-DD') ILIKE :search
-					OR TO_CHAR(c.end_date, 'YYYY-MM-DD') ILIKE :search
-				)
-			)`,
-			`EXISTS (
 				SELECT 1 FROM users u
 				WHERE u.id = i.creator_id
 				AND (u.name ILIKE :search OR u.display_name ILIKE :search OR u.email ILIKE :search)
@@ -230,11 +201,6 @@ func (r *IssueRepository) List(ctx context.Context, workspaceID uuid.UUID, param
 				WHERE il.issue_id = i.id
 				AND l.deleted_at IS NULL
 				AND (l.name ILIKE :search OR l.description ILIKE :search OR l.color ILIKE :search)
-			)`,
-			`EXISTS (
-				SELECT 1 FROM teams t
-				WHERE t.id = i.team_id
-				AND (t.name ILIKE :search OR t.key ILIKE :search OR t.description ILIKE :search)
 			)`,
 		}
 		where = append(where, "("+strings.Join(searchFields, " OR ")+")")
@@ -364,10 +330,12 @@ func (r *IssueRepository) Update(ctx context.Context, issue *domain.Issue) error
 	).Scan(&issue.UpdatedAt)
 }
 
-func (r *IssueRepository) UpdateTeam(ctx context.Context, tx *sqlx.Tx, issueID uuid.UUID, teamID *uuid.UUID, number int, identifier string) error {
+// UpdateProjectKey recalculates the issue number/identifier when the issue
+// moves to a different project (inside the caller's transaction).
+func (r *IssueRepository) UpdateProjectKey(ctx context.Context, tx *sqlx.Tx, issueID uuid.UUID, projectID *uuid.UUID, number int, identifier string) error {
 	_, err := tx.ExecContext(ctx,
-		`UPDATE issues SET team_id = $1, number = $2, identifier_text = $3, updated_at = NOW() WHERE id = $4`,
-		teamID, number, identifier, issueID,
+		`UPDATE issues SET project_id = $1, number = $2, identifier_text = $3, updated_at = NOW() WHERE id = $4`,
+		projectID, number, identifier, issueID,
 	)
 	return err
 }
@@ -507,7 +475,7 @@ func (r *IssueRepository) CycleIsActive(ctx context.Context, cycleID uuid.UUID) 
 	return active, err
 }
 
-func (r *IssueRepository) BulkUpdate(ctx context.Context, workspaceID uuid.UUID, issueIDs []uuid.UUID, status *string, priority *int, assigneeID *uuid.UUID, statusID *uuid.UUID, cycleID *uuid.UUID, cycleSet bool) (int, error) {
+func (r *IssueRepository) BulkUpdate(ctx context.Context, workspaceID uuid.UUID, issueIDs []uuid.UUID, status *string, priority *int, assigneeID *uuid.UUID, statusID *uuid.UUID) (int, error) {
 	setClauses := []string{"updated_at = NOW()"}
 	args := []interface{}{workspaceID}
 	argIdx := 2
@@ -530,15 +498,6 @@ func (r *IssueRepository) BulkUpdate(ctx context.Context, workspaceID uuid.UUID,
 	if statusID != nil {
 		setClauses = append(setClauses, fmt.Sprintf("status_id = $%d", argIdx))
 		args = append(args, *statusID)
-		argIdx++
-	}
-	if cycleSet {
-		setClauses = append(setClauses, fmt.Sprintf("cycle_id = $%d", argIdx))
-		var cycleArg interface{}
-		if cycleID != nil {
-			cycleArg = *cycleID
-		}
-		args = append(args, cycleArg)
 		argIdx++
 	}
 

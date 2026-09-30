@@ -6,8 +6,7 @@
 	import type { ViewFilter } from '$lib/types/view';
 	import type { IssuePriority, IssueStatus } from '$lib/types/issue';
 	import { getPriorityLabel, getPriorityLabels, getStatusLabel } from '$lib/types/issue';
-	import { teamStatusesState } from '$lib/features/issues/team-statuses.state.svelte';
-	import type { Team } from '$lib/types/team';
+	import { statusesState } from '$lib/features/issues/statuses.state.svelte';
 	import type { Project } from '$lib/types/project';
 	import type { Label } from '$lib/types/label';
 	import type { WorkspaceMember } from '$lib/types/workspace';
@@ -19,7 +18,6 @@
 
 	let {
 		filters = $bindable<ViewFilter>({}),
-		teams = [],
 		projects = [],
 		labels = [],
 		members = [],
@@ -27,7 +25,6 @@
 		onchange
 	}: {
 		filters: ViewFilter;
-		teams?: Team[];
 		projects?: Project[];
 		labels?: Label[];
 		members?: WorkspaceMember[];
@@ -95,7 +92,7 @@
 	}
 
 	function getStatusByValue(value: string) {
-		return teamStatusesState.statusById.get(value) ?? teamStatusesState.statusOrder.find((ts) => ts.slug === value);
+		return statusesState.statusById.get(value) ?? statusesState.statusOrder.find((ts) => ts.slug === value);
 	}
 
 	function statusValueMatches(status: { id: string; slug?: string }, value: string): boolean {
@@ -243,10 +240,6 @@
 				return getLabelChipLabel();
 			case 'status_type':
 				return m['sharedComponents.filter_builder.status_type']({ type: filters.status_type ?? '' });
-			case 'cycle':
-				return filters.cycle === 'none' ? m['sharedComponents.filter_builder.no_cycle']() : m['sharedComponents.filter_builder.cycle']();
-			case 'team':
-				return m['sharedComponents.filter_builder.team']();
 			case 'creator':
 				return m['sharedComponents.filter_builder.creator']();
 			case 'sub_issues':
@@ -286,15 +279,15 @@
 		{#snippet readonlyContent(key: string)}
 			{#if key === 'status'}
 				{@const statusValues = getStatusValues()}
-				{#if teamStatusesState.statusOrder.length > 0}
-					{#each statusValues.filter((value) => !teamStatusesState.statusOrder.some( (ts) => statusValueMatches(ts, value) )) as value}
+				{#if statusesState.statusOrder.length > 0}
+					{#each statusValues.filter((value) => !statusesState.statusOrder.some( (ts) => statusValueMatches(ts, value) )) as value}
 						<div class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-[var(--color-text-primary)]">
 							<Checkbox checked class="pointer-events-none" />
 							<IssueStatusIcon status={value} size={14} />
 							{getStatusLabel(value as IssueStatus) ?? value}
 						</div>
 					{/each}
-					{#each teamStatusesState.statusOrder as ts}
+					{#each statusesState.statusOrder as ts}
 						{@const selected = statusValues.some((value) => statusValueMatches(ts, value))}
 						<div class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-[var(--color-text-primary)]">
 							<Checkbox checked={selected} class="pointer-events-none" />
@@ -386,7 +379,7 @@
 					</button>
 				</Popover.Trigger>
 				<Popover.Content class="w-44 p-1" align="start">
-					{#each teamStatusesState.statusOrder as ts}
+					{#each statusesState.statusOrder as ts}
 						<button
 							onclick={() => toggleStatus(ts.id)}
 							class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)]"

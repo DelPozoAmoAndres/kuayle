@@ -5,42 +5,48 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/kuayle/kuayle-backend/internal/domain"
 	"github.com/kuayle/kuayle-backend/internal/dto"
 	"github.com/kuayle/kuayle-backend/internal/repository"
-	"github.com/google/uuid"
 )
 
-type TeamStatusService struct {
-	statusRepo     repository.TeamStatusRepo
+// StatusService manages the statuses of a workspace (owned by the legacy
+// `team_statuses` table).
+type StatusService struct {
+	statusRepo     repository.StatusRepo
 	visibilityRepo repository.ProjectStatusVisibilityRepo
 }
 
-func NewTeamStatusService(statusRepo repository.TeamStatusRepo, visibilityRepo repository.ProjectStatusVisibilityRepo) *TeamStatusService {
-	return &TeamStatusService{statusRepo: statusRepo, visibilityRepo: visibilityRepo}
+func NewStatusService(statusRepo repository.StatusRepo, visibilityRepo repository.ProjectStatusVisibilityRepo) *StatusService {
+	return &StatusService{statusRepo: statusRepo, visibilityRepo: visibilityRepo}
 }
 
-func (s *TeamStatusService) List(ctx context.Context, teamID uuid.UUID) ([]domain.TeamStatus, error) {
-	return s.statusRepo.ListByTeam(ctx, teamID)
+func (s *StatusService) List(ctx context.Context, workspaceID uuid.UUID) ([]domain.WorkspaceStatus, error) {
+	return s.statusRepo.ListByWorkspace(ctx, workspaceID)
 }
 
-func (s *TeamStatusService) Create(ctx context.Context, teamID uuid.UUID, req dto.CreateTeamStatusRequest) (*domain.TeamStatus, error) {
-	pos, err := s.statusRepo.NextPosition(ctx, teamID)
+func (s *StatusService) GetByWorkspaceAndSlug(ctx context.Context, workspaceID uuid.UUID, slug string) (*domain.WorkspaceStatus, error) {
+	return s.statusRepo.GetByWorkspaceAndSlug(ctx, workspaceID, slug)
+}
+
+func (s *StatusService) Create(ctx context.Context, workspaceID uuid.UUID, req dto.CreateStatusRequest) (*domain.WorkspaceStatus, error) {
+	pos, err := s.statusRepo.NextPosition(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
 
 	slug := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(req.Name), " ", "_"))
 
-	status := &domain.TeamStatus{
-		ID:        uuid.New(),
-		TeamID:    teamID,
-		Name:      req.Name,
-		Slug:      slug,
-		Category:  domain.StatusCategory(req.Category),
-		Color:     req.Color,
-		Position:  pos,
-		IsDefault: false,
+	status := &domain.WorkspaceStatus{
+		ID:          uuid.New(),
+		WorkspaceID: workspaceID,
+		Name:        req.Name,
+		Slug:        slug,
+		Category:    domain.StatusCategory(req.Category),
+		Color:       req.Color,
+		Position:    pos,
+		IsDefault:   false,
 	}
 
 	if err := s.statusRepo.Create(ctx, status); err != nil {
@@ -63,9 +69,9 @@ func (s *TeamStatusService) Create(ctx context.Context, teamID uuid.UUID, req dt
 	return status, nil
 }
 
-func (s *TeamStatusService) Update(ctx context.Context, id uuid.UUID, req dto.UpdateTeamStatusRequest) (*domain.TeamStatus, error) {
+func (s *StatusService) Update(ctx context.Context, workspaceID, id uuid.UUID, req dto.UpdateStatusRequest) (*domain.WorkspaceStatus, error) {
 	status, err := s.statusRepo.GetByID(ctx, id)
-	if err != nil || status == nil {
+	if err != nil || status == nil || status.WorkspaceID != workspaceID {
 		return nil, fmt.Errorf("status not found")
 	}
 
@@ -112,21 +118,40 @@ func (s *TeamStatusService) Update(ctx context.Context, id uuid.UUID, req dto.Up
 	return status, nil
 }
 
-func (s *TeamStatusService) ListProjectIDsForStatuses(ctx context.Context, statusIDs []uuid.UUID) (map[uuid.UUID][]uuid.UUID, error) {
+func (s *StatusService) ListProjectIDsForStatuses(ctx context.Context, statusIDs []uuid.UUID) (map[uuid.UUID][]uuid.UUID, error) {
 	return s.visibilityRepo.ListProjectIDsByStatuses(ctx, statusIDs)
 }
 
-func (s *TeamStatusService) ListProjectsForStatus(ctx context.Context, statusID uuid.UUID) ([]uuid.UUID, error) {
+func (s *StatusService) ListProjectsForStatus(ctx context.Context, statusID uuid.UUID) ([]uuid.UUID, error) {
 	return s.visibilityRepo.ListProjectsForStatus(ctx, statusID)
 }
 
-func (s *TeamStatusService) Delete(ctx context.Context, id uuid.UUID) error {
+func (s *StatusService) Delete(ctx context.Context, workspaceID, id uuid.UUID) error {
 	status, err := s.statusRepo.GetByID(ctx, id)
-	if err != nil || status == nil {
+	if err != nil || status == nil || status.WorkspaceID != workspaceID {
 		return fmt.Errorf("status not found")
 	}
 	if status.IsDefault {
 		return fmt.Errorf("cannot delete the default status")
 	}
 	return s.statusRepo.Delete(ctx, id)
+}
+
+// defaultStatusSpecs is the default status set seeded for every new workspace.
+type defaultStatusSpec struct {
+	Name     string
+	Slug     string
+	Category domain.StatusCategory
+	Position int
+}
+
+func defaultStatusSpecs() []defaultStatusSpec {
+	return []defaultStatusSpec{
+		{"Backlog", "backlog", domain.StatusCategoryBacklog, 0},
+		{"Todo", "todo", domain.StatusCategoryUnstarted, 1},
+		{"In Progress", "in_progress", domain.StatusCategoryStarted, 2},
+		{"In Review", "in_review", domain.StatusCategoryStarted, 3},
+		{"Done", "done", domain.StatusCategoryCompleted, 4},
+		{"Cancelled", "cancelled", domain.StatusCategoryCancelled, 5},
+	}
 }

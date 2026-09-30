@@ -91,13 +91,6 @@ func (s *PreferencesService) Update(ctx context.Context, userID uuid.UUID, req d
 		}
 		prefs.WorkflowSortOrder = domain.WorkflowSortOrder(order)
 	}
-	if req.TeamWorkflowSortOverrides != nil {
-		overrides, err := normalizeWorkflowSortOverrides(*req.TeamWorkflowSortOverrides)
-		if err != nil {
-			return nil, err
-		}
-		prefs.TeamWorkflowSortOverrides = overrides
-	}
 	if req.RecentDueDates != nil {
 		prefs.RecentDueDates = domain.RecentDueDates(normalizeRecentDueDates(*req.RecentDueDates))
 	}
@@ -133,33 +126,6 @@ func normalizeRecentDueDates(dates []string) []string {
 	return normalized
 }
 
-func normalizeWorkflowSortOverrides(req map[string]dto.WorkflowSortOverride) (domain.TeamWorkflowSortOverrides, error) {
-	overrides := domain.TeamWorkflowSortOverrides{}
-	for key, override := range req {
-		if key == "" {
-			return nil, fmt.Errorf("%w: team workflow sort override key cannot be empty", ErrInvalidPreferences)
-		}
-		if !validOverrideMode(override.Mode) {
-			return nil, fmt.Errorf("%w: invalid team workflow sort mode %q", ErrInvalidPreferences, override.Mode)
-		}
-
-		var order domain.WorkflowSortOrder
-		if len(override.WorkflowSortOrder) > 0 {
-			normalized, err := normalizeWorkflowSortOrder(override.WorkflowSortOrder)
-			if err != nil {
-				return nil, err
-			}
-			order = domain.WorkflowSortOrder(normalized)
-		}
-
-		overrides[key] = domain.WorkflowSortOverride{
-			Mode:              override.Mode,
-			WorkflowSortOrder: order,
-		}
-	}
-	return overrides, nil
-}
-
 func normalizeWorkflowSortOrder(order []string) ([]string, error) {
 	if len(order) != len(defaultWorkflowSortOrder) {
 		return nil, fmt.Errorf("%w: workflow sort order must contain all status categories", ErrInvalidPreferences)
@@ -179,15 +145,6 @@ func normalizeWorkflowSortOrder(order []string) ([]string, error) {
 		seen[category] = true
 	}
 	return order, nil
-}
-
-func validOverrideMode(mode string) bool {
-	switch mode {
-	case "inherit", "default", "active-first", "custom":
-		return true
-	default:
-		return false
-	}
 }
 
 func validIssuesGroupBy(val string) bool {

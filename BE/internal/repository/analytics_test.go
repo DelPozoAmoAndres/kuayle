@@ -27,36 +27,30 @@ func TestAnalyticsRepositoryPostgres(t *testing.T) {
 	issueRepo := NewIssueRepository(db)
 	ctx := context.Background()
 	workspaceID := "00000000-0000-0000-0000-000000000002"
-	teamID := "00000000-0000-0000-0000-000000000003"
 
-	issue, err := issueRepo.GetByIdentifier(ctx, uuid.MustParse(workspaceID), "CORE-1")
+	issue, err := issueRepo.GetByIdentifier(ctx, uuid.MustParse(workspaceID), "MVP-1")
 	if err != nil || issue == nil {
 		t.Fatalf("GetByIdentifier() issue = %#v, error = %v", issue, err)
 	}
 	issues, total, err := issueRepo.List(ctx, uuid.MustParse(workspaceID), dto.IssueFilterParams{
-		TeamID:  teamID,
 		GroupBy: "status",
 		Sort:    "sort_order",
 		Order:   "asc",
 	})
-	if err != nil || total != 1 || len(issues) != 1 {
+	if err != nil || total < 1 || len(issues) < 1 {
 		t.Fatalf("List() issues = %#v, total = %d, error = %v", issues, total, err)
 	}
 
-	distribution, err := repo.Distribution(ctx, workspaceID, "")
+	distribution, err := repo.Distribution(ctx, workspaceID)
 	if err != nil {
 		t.Fatalf("Distribution() error = %v", err)
 	}
 	if len(distribution.ByStatus) != 3 || distribution.ByStatus[2].StatusName != "Complete" {
 		t.Fatalf("unexpected status distribution: %#v", distribution.ByStatus)
 	}
-	teamDistribution, err := repo.Distribution(ctx, workspaceID, teamID)
-	if err != nil || len(teamDistribution.ByStatus) != 3 {
-		t.Fatalf("team Distribution() result = %#v, error = %v", teamDistribution, err)
-	}
-	teamOverview, err := repo.Overview(ctx, workspaceID, teamID)
-	if err != nil || teamOverview.TotalIssues != 1 {
-		t.Fatalf("team Overview() result = %#v, error = %v", teamOverview, err)
+	overview, err := repo.Overview(ctx, workspaceID)
+	if err != nil || overview.TotalIssues < 1 {
+		t.Fatalf("Overview() result = %#v, error = %v", overview, err)
 	}
 
 	insights, err := repo.Insights(ctx, workspaceID, &dto.AnalyticsInsightsParams{
@@ -87,7 +81,6 @@ func TestAnalyticsRepositoryPostgres(t *testing.T) {
 		From:     "2026-07-01",
 		To:       "2026-07-31",
 		Interval: "week",
-		TeamID:   &teamID,
 	})
 	if err != nil {
 		t.Fatalf("Burnup() error = %v", err)
@@ -172,17 +165,11 @@ func TestValidateInsightParams(t *testing.T) {
 		},
 		{
 			name:   "all valid dimensions",
-			params: dto.AnalyticsInsightsParams{Slice: "assignee", Segment: "team"},
+			params: dto.AnalyticsInsightsParams{Slice: "assignee", Segment: "project"},
 		},
 		{
 			name:   "label with segment",
 			params: dto.AnalyticsInsightsParams{Slice: "label", Segment: "status_type"},
-		},
-		{
-			name:    "invalid team id",
-			params:  dto.AnalyticsInsightsParams{TeamID: stringPtr("not-a-uuid")},
-			wantErr: true,
-			errMsg:  "invalid team_id",
 		},
 		{
 			name:    "invalid priority",
@@ -225,7 +212,7 @@ func TestValidateBurnupParams(t *testing.T) {
 		{name: "valid defaults", params: dto.AnalyticsBurnupParams{From: "2026-01-01", To: "2026-02-01"}},
 		{name: "invalid interval", params: dto.AnalyticsBurnupParams{From: "2026-01-01", To: "2026-02-01", Interval: "year"}, wantErr: true},
 		{name: "reversed range", params: dto.AnalyticsBurnupParams{From: "2026-02-01", To: "2026-01-01"}, wantErr: true},
-		{name: "invalid scoped id", params: dto.AnalyticsBurnupParams{From: "2026-01-01", To: "2026-02-01", TeamID: stringPtr("bad")}, wantErr: true},
+		{name: "invalid scoped id", params: dto.AnalyticsBurnupParams{From: "2026-01-01", To: "2026-02-01", ProjectID: stringPtr("bad")}, wantErr: true},
 		{name: "valid status type", params: dto.AnalyticsBurnupParams{From: "2026-01-01", To: "2026-02-01", StatusType: stringPtr("started")}},
 		{name: "invalid status type", params: dto.AnalyticsBurnupParams{From: "2026-01-01", To: "2026-02-01", StatusType: stringPtr("done")}, wantErr: true},
 		{name: "366 daily buckets accepted", params: dto.AnalyticsBurnupParams{From: "2024-01-01", To: "2024-12-31", Interval: "day"}},
@@ -485,22 +472,22 @@ func TestBuildInsightWhere(t *testing.T) {
 		}
 	})
 
-	t.Run("with team filter", func(t *testing.T) {
-		teamID := "team-uuid"
+	t.Run("with project filter", func(t *testing.T) {
+		projectID := "project-uuid"
 		where, args, err := r.buildInsightWhere("ws-1", &dto.AnalyticsInsightsParams{
-			TeamID: &teamID,
+			ProjectID: &projectID,
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		found := false
 		for _, w := range where {
-			if contains(w, "team_id") {
+			if contains(w, "project_id") {
 				found = true
 			}
 		}
 		if !found {
-			t.Errorf("team filter not found in: %v", where)
+			t.Errorf("project filter not found in: %v", where)
 		}
 		_ = args
 	})
@@ -606,11 +593,11 @@ func TestBuildInsightWhere(t *testing.T) {
 	t.Run("empty filter IDs are ignored", func(t *testing.T) {
 		empty := ""
 		where, _, _ := r.buildInsightWhere("ws-1", &dto.AnalyticsInsightsParams{
-			TeamID: &empty,
+			ProjectID: &empty,
 		})
 		for _, w := range where {
-			if contains(w, "team_id =") {
-				t.Errorf("empty team_id should be ignored: %v", where)
+			if contains(w, "project_id =") {
+				t.Errorf("empty project_id should be ignored: %v", where)
 			}
 		}
 	})

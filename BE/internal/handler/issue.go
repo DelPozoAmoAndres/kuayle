@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -19,21 +20,20 @@ import (
 )
 
 type IssueHandler struct {
-	issueSvc       *service.IssueService
-	relationSvc    *service.IssueRelationService
-	commentSvc     *service.CommentService
-	userRepo       repository.UserRepo
-	teamStatusRepo repository.TeamStatusRepo
-	projectRepo    repository.ProjectRepo
-	cycleRepo      repository.CycleRepo
+	issueSvc    *service.IssueService
+	relationSvc *service.IssueRelationService
+	commentSvc  *service.CommentService
+	userRepo    repository.UserRepo
+	statusRepo  repository.StatusRepo
+	projectRepo repository.ProjectRepo
 }
 
 type userBatchRepo interface {
 	ListByIDs(ctx context.Context, ids []uuid.UUID) (map[uuid.UUID]domain.User, error)
 }
 
-func NewIssueHandler(issueSvc *service.IssueService, commentSvc *service.CommentService, userRepo repository.UserRepo, teamStatusRepo repository.TeamStatusRepo, projectRepo repository.ProjectRepo, cycleRepo repository.CycleRepo, relationSvc *service.IssueRelationService) *IssueHandler {
-	return &IssueHandler{issueSvc: issueSvc, relationSvc: relationSvc, commentSvc: commentSvc, userRepo: userRepo, teamStatusRepo: teamStatusRepo, projectRepo: projectRepo, cycleRepo: cycleRepo}
+func NewIssueHandler(issueSvc *service.IssueService, commentSvc *service.CommentService, userRepo repository.UserRepo, statusRepo repository.StatusRepo, projectRepo repository.ProjectRepo, relationSvc *service.IssueRelationService) *IssueHandler {
+	return &IssueHandler{issueSvc: issueSvc, relationSvc: relationSvc, commentSvc: commentSvc, userRepo: userRepo, statusRepo: statusRepo, projectRepo: projectRepo}
 }
 
 func (h *IssueHandler) List(c echo.Context) error {
@@ -74,13 +74,13 @@ func (h *IssueHandler) List(c echo.Context) error {
 			statusIDSet[*issue.StatusID] = struct{}{}
 		}
 	}
-	statusMap := make(map[uuid.UUID]*domain.TeamStatus)
+	statusMap := make(map[uuid.UUID]*domain.WorkspaceStatus)
 	if len(statusIDSet) > 0 {
 		statusIDs := make([]uuid.UUID, 0, len(statusIDSet))
 		for id := range statusIDSet {
 			statusIDs = append(statusIDs, id)
 		}
-		statuses, _ := h.teamStatusRepo.GetByIDs(ctx, statusIDs)
+		statuses, _ := h.statusRepo.GetByIDs(ctx, statusIDs)
 		for i := range statuses {
 			statusMap[statuses[i].ID] = &statuses[i]
 		}
@@ -423,27 +423,34 @@ func (h *IssueHandler) ListComments(c echo.Context) error {
 
 func (h *IssueHandler) toCommentResponse(ctx context.Context, comment domain.Comment) dto.CommentResponse {
 	cr := dto.CommentResponse{
-		ID:         comment.ID.String(),
-		IssueID:    comment.IssueID.String(),
-		UserID:     comment.UserID.String(),
-		Body:       comment.Body,
-		ResolvedAt: comment.ResolvedAt,
-		CreatedAt:  comment.CreatedAt,
-		UpdatedAt:  comment.UpdatedAt,
+		ID:              comment.ID.String(),
+		IssueID:         comment.IssueID.String(),
+		Body:            comment.Body,
+		AuthorLogin:     comment.AuthorLogin,
+		AuthorAvatarURL: comment.AuthorAvatarURL,
+		GiteaCommentID:  comment.GiteaCommentID,
+		ResolvedAt:      comment.ResolvedAt,
+		CreatedAt:       comment.CreatedAt,
+		UpdatedAt:       comment.UpdatedAt,
+	}
+	// Comments coming from Gitea may have no local user behind them.
+	if comment.UserID != nil {
+		userID := comment.UserID.String()
+		cr.UserID = &userID
+		user, _ := h.userRepo.GetByID(ctx, *comment.UserID)
+		if user != nil {
+			cr.User = &dto.UserResponse{
+				ID:          user.ID.String(),
+				Email:       user.Email,
+				Name:        user.Name,
+				DisplayName: user.DisplayName,
+				AvatarURL:   user.AvatarURL,
+			}
+		}
 	}
 	if comment.ParentID != nil {
 		s := comment.ParentID.String()
 		cr.ParentID = &s
-	}
-	user, _ := h.userRepo.GetByID(ctx, comment.UserID)
-	if user != nil {
-		cr.User = &dto.UserResponse{
-			ID:          user.ID.String(),
-			Email:       user.Email,
-			Name:        user.Name,
-			DisplayName: user.DisplayName,
-			AvatarURL:   user.AvatarURL,
-		}
 	}
 	return cr
 }
@@ -470,8 +477,11 @@ func (h *IssueHandler) CreateComment(c echo.Context) error {
 		return response.NotFound(c, "Issue")
 	}
 
-	comment, err := h.commentSvc.Create(c.Request().Context(), issue.ID, userID, req)
+	comment, err := h.commentSvc.Create(c.Request().Context(), ws.ID, issue.ID, userID, req)
 	if err != nil {
+		if errors.Is(err, service.ErrGiteaLoginRequired) {
+			return response.Error(c, http.StatusConflict, "GITEA_LOGIN_REQUIRED", err.Error())
+		}
 		return response.InternalError(c)
 	}
 
@@ -614,19 +624,6 @@ func (h *IssueHandler) historyDisplayValue(ctx context.Context, field string, va
 			return stringPtr("Deleted project")
 		}
 		return stringPtr(project.Name)
-	case "cycle", "cycle_id":
-		id, err := uuid.Parse(raw)
-		if err != nil {
-			return value
-		}
-		if h.cycleRepo == nil {
-			return stringPtr("Unknown cycle")
-		}
-		cycle, _ := h.cycleRepo.GetByID(ctx, id)
-		if cycle == nil {
-			return stringPtr("Deleted cycle")
-		}
-		return stringPtr(cycle.Name)
 	case "assignee", "assignee_id":
 		id, err := uuid.Parse(raw)
 		if err != nil {
@@ -663,7 +660,7 @@ func (h *IssueHandler) historyDisplayValue(ctx context.Context, field string, va
 		return stringPtr(strings.Join(names, ", "))
 	case "status", "status_id":
 		if id, err := uuid.Parse(raw); err == nil {
-			status, _ := h.teamStatusRepo.GetByID(ctx, id)
+			status, _ := h.statusRepo.GetByID(ctx, id)
 			if status != nil {
 				return stringPtr(status.Name)
 			}
@@ -817,7 +814,7 @@ func (h *IssueHandler) enrichStatusInfo(ctx context.Context, resp *dto.IssueResp
 	if issue.StatusID == nil {
 		return
 	}
-	ts, err := h.teamStatusRepo.GetByID(ctx, *issue.StatusID)
+	ts, err := h.statusRepo.GetByID(ctx, *issue.StatusID)
 	if err != nil || ts == nil {
 		return
 	}
@@ -936,17 +933,9 @@ func toIssueResponse(issue domain.Issue) dto.IssueResponse {
 		CreatedAt:   issue.CreatedAt,
 		UpdatedAt:   issue.UpdatedAt,
 	}
-	if issue.TeamID != nil {
-		s := issue.TeamID.String()
-		resp.TeamID = &s
-	}
 	if issue.ProjectID != nil {
 		s := issue.ProjectID.String()
 		resp.ProjectID = &s
-	}
-	if issue.CycleID != nil {
-		s := issue.CycleID.String()
-		resp.CycleID = &s
 	}
 	if issue.AssigneeID != nil {
 		s := issue.AssigneeID.String()
@@ -992,10 +981,6 @@ func toProjectResponseForIssue(project domain.Project) dto.ProjectResponse {
 		CreatedAt:   project.CreatedAt,
 		UpdatedAt:   project.UpdatedAt,
 	}
-	if project.TeamID != nil {
-		s := project.TeamID.String()
-		resp.TeamID = &s
-	}
 	if project.LeadID != nil {
 		s := project.LeadID.String()
 		resp.LeadID = &s
@@ -1015,7 +1000,7 @@ func (h *IssueHandler) toIssueSummaryResponse(ctx context.Context, issue domain.
 	if issue.StatusID != nil {
 		statusID := issue.StatusID.String()
 		resp.StatusID = &statusID
-		status, _ := h.teamStatusRepo.GetByID(ctx, *issue.StatusID)
+		status, _ := h.statusRepo.GetByID(ctx, *issue.StatusID)
 		if status != nil {
 			resp.StatusInfo = &dto.StatusInfoResponse{
 				ID:       status.ID.String(),
