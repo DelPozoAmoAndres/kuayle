@@ -242,6 +242,8 @@ func (s *IssueService) Create(ctx context.Context, workspaceID, creatorID uuid.U
 		if err := s.giteaSvc.SyncIssueToGitea(ctx, issue); err != nil {
 			log.WithError(err).WithField("issue_id", issue.ID).Warn("failed to sync issue to Gitea")
 		}
+		// Keep the Gitea label set equivalent to the issue status.
+		s.giteaSvc.syncStatusLabel(ctx, issue)
 	}
 
 	return issue, nil
@@ -789,6 +791,9 @@ func (s *IssueService) Update(ctx context.Context, workspaceID, userID uuid.UUID
 						log.WithError(err).WithField("issue_id", issue.ID).Warn("failed to sync issue reopen to Gitea")
 					}
 				}
+				// Statuses and Gitea labels are equivalent: mirror the new
+				// status as the issue's label set.
+				s.giteaSvc.syncStatusLabel(ctx, issue)
 			}
 		}
 	}
@@ -849,6 +854,9 @@ func (s *IssueService) Triage(ctx context.Context, workspaceID, userID uuid.UUID
 	}
 	if !accept {
 		s.applyStatusAutomation(ctx, workspaceID, userID, issue, map[uuid.UUID]bool{})
+		if s.giteaSvc != nil {
+			s.giteaSvc.syncStatusLabel(ctx, issue)
+		}
 	}
 
 	s.hub.Broadcast(workspaceID, realtime.Event{
@@ -984,6 +992,9 @@ func (s *IssueService) BulkUpdate(ctx context.Context, workspaceID, userID uuid.
 		if err == nil && issue != nil && issue.WorkspaceID == workspaceID {
 			if req.Status != nil || req.StatusID != nil {
 				s.applyStatusAutomation(ctx, workspaceID, userID, issue, map[uuid.UUID]bool{})
+				if s.giteaSvc != nil {
+					s.giteaSvc.syncStatusLabel(ctx, issue)
+				}
 			}
 			for _, uid := range s.issueNotificationRecipients(ctx, issue, userID, true) {
 				recipientCounts[uid]++
@@ -1184,6 +1195,9 @@ func (s *IssueService) moveIssueToCompleted(ctx context.Context, workspaceID, ac
 	newVal := completedStatus.Slug
 	s.recordHistory(ctx, issue.ID, actorID, "status", &old, &newVal)
 	s.hub.Broadcast(workspaceID, realtime.Event{Type: "issue.updated", Payload: issue})
+	if s.giteaSvc != nil {
+		s.giteaSvc.syncStatusLabel(ctx, issue)
+	}
 	s.applyStatusAutomation(ctx, workspaceID, actorID, issue, visited)
 }
 

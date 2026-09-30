@@ -5,14 +5,20 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path"
+	"strconv"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/kuayle/kuayle-backend/internal/domain"
 	"github.com/kuayle/kuayle-backend/internal/repository"
 	"github.com/kuayle/kuayle-backend/pkg/crypto"
+	gt "github.com/kuayle/kuayle-backend/pkg/gitea"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -278,3 +284,232 @@ func TestSyncCommentToGitea_SkipsAuthorWithoutToken(t *testing.T) {
 }
 
 func int64Ptr(v int64) *int64 { return &v }
+
+// --- Status ↔ Gitea label equivalence ---
+
+// Label matching picks the workspace status a Gitea label refers to,
+// preferring a label that differs from the status the issue is on.
+func TestStatusForLabels_MatchesAndPrefersFreshLabel(t *testing.T) {
+	statuses := []domain.WorkspaceStatus{
+		{ID: uuid.New(), Name: "In Progress", Slug: "in_progress"},
+		{ID: uuid.New(), Name: "Done", Slug: "done"},
+	}
+	labels := func(names ...string) []giteaWebhookLabel {
+		out := make([]giteaWebhookLabel, 0, len(names))
+		for _, n := range names {
+			out = append(out, giteaWebhookLabel{Name: n})
+		}
+		return out
+	}
+
+	// No match: unrelated labels leave the status alone.
+	assert.Nil(t, statusForLabels(statuses, labels("bug", "help wanted"), nil))
+
+	// Match by name and by slug, case-insensitively.
+	assert.Equal(t, "In Progress", statusForLabels(statuses, labels("IN PROGRESS"), nil).Name)
+	assert.Equal(t, "In Progress", statusForLabels(statuses, labels("in_progress"), nil).Name)
+
+	// With two status labels the one the user just added wins over the
+	// current status.
+	assert.Equal(t, "Done", statusForLabels(statuses, labels("In Progress", "Done"), &statuses[0].ID).Name)
+
+	// When every status label is the current one, it is returned unchanged.
+	assert.Equal(t, "In Progress", statusForLabels(statuses, labels("In Progress"), &statuses[0].ID).Name)
+}
+
+// Kuayle status colors are "#rrggbb"; Gitea wants plain hex.
+func TestGiteaLabelColor(t *testing.T) {
+	hex := func(s string) *string { return &s }
+	assert.Equal(t, "ef4444", giteaLabelColor(hex("#ef4444")))
+	assert.Equal(t, "ef4444", giteaLabelColor(hex("ef4444")))
+	assert.Equal(t, "ededed", giteaLabelColor(hex("#nope")))
+	assert.Equal(t, "ededed", giteaLabelColor(nil))
+}
+
+// outgoing sync: the status label is created when missing, attached to the
+// issue, stale status labels are dropped and unrelated labels survive.
+func TestSyncIssueStatusLabelsToGitea(t *testing.T) {
+	type fakeGitea struct {
+		mu          sync.Mutex
+		repoLabels  []gt.Label
+		issueLabels []gt.Label
+	}
+	f := &fakeGitea{
+		repoLabels:  []gt.Label{{ID: 1, Name: "bug"}},
+		issueLabels: []gt.Label{{ID: 1, Name: "bug"}, {ID: 9, Name: "Backlog"}},
+	}
+	gitea := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.Contains(r.URL.Path, "/issues/") && r.Method == http.MethodGet:
+			_ = json.NewEncoder(w).Encode(f.issueLabels)
+		case strings.Contains(r.URL.Path, "/issues/") && r.Method == http.MethodPost:
+			var body struct {
+				Labels []int64 `json:"labels"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			for _, id := range body.Labels {
+				for _, l := range f.repoLabels {
+					if l.ID == id {
+						f.issueLabels = append(f.issueLabels, l)
+					}
+				}
+			}
+			_ = json.NewEncoder(w).Encode(f.issueLabels)
+		case strings.Contains(r.URL.Path, "/issues/") && r.Method == http.MethodDelete:
+			id := path.Base(r.URL.Path)
+			kept := f.issueLabels[:0]
+			for _, l := range f.issueLabels {
+				if strconv.FormatInt(l.ID, 10) != id {
+					kept = append(kept, l)
+				}
+			}
+			f.issueLabels = kept
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/labels"):
+			_ = json.NewEncoder(w).Encode(f.repoLabels)
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/labels"):
+			var body struct {
+				Name  string `json:"name"`
+				Color string `json:"color"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			label := gt.Label{ID: 42, Name: body.Name, Color: body.Color}
+			f.repoLabels = append(f.repoLabels, label)
+			_ = json.NewEncoder(w).Encode(label)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer gitea.Close()
+
+	svc, _ := newTokenService(t, gitea.URL)
+	workspaceToken, err := crypto.Encrypt("workspace-token", svc.encryptionKey)
+	require.NoError(t, err)
+	svc.gtRepo = &stubTokenGiteaRepo{
+		inst: &domain.GiteaInstance{
+			ID: uuid.New(), WorkspaceID: uuid.New(),
+			InstanceURL: gitea.URL, AccessToken: workspaceToken,
+		},
+		repos: []domain.GiteaRepoModel{{
+			ID: uuid.New(), WorkspaceID: uuid.New(), GiteaRepoID: 1,
+			FullName: "octo/rocket", IsActive: true,
+		}},
+	}
+	statusID := uuid.New()
+	color := "#3b82f6"
+	svc.statusRepo = &stubStatusLabelRepo{statuses: []domain.WorkspaceStatus{
+		{ID: uuid.New(), Name: "Backlog", Slug: "backlog"},
+		{ID: statusID, Name: "In Progress", Slug: "in_progress", Color: &color},
+	}}
+	issue := &domain.Issue{
+		ID: uuid.New(), WorkspaceID: uuid.New(),
+		GiteaIssueIndex: int64Ptr(7), StatusID: &statusID, Status: "in_progress",
+	}
+	issue.GiteaInstanceID = &[]uuid.UUID{uuid.New()}[0]
+
+	require.NoError(t, svc.SyncIssueStatusLabelsToGitea(context.Background(), issue))
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	names := make([]string, 0, len(f.issueLabels))
+	for _, l := range f.issueLabels {
+		names = append(names, l.Name)
+	}
+	assert.ElementsMatch(t, []string{"bug", "In Progress"}, names, "stale status label dropped, unrelated kept")
+	createdIdx := -1
+	for i, l := range f.repoLabels {
+		if l.Name == "In Progress" {
+			createdIdx = i
+		}
+	}
+	require.NotEqual(t, -1, createdIdx, "status label must be created on the repo")
+	assert.Equal(t, "3b82f6", f.repoLabels[createdIdx].Color, "label color comes from the status color")
+}
+
+// Incoming label change: the matching label becomes the issue status, a
+// history entry is recorded, and the label set is normalized.
+func TestSyncStatusFromGiteaLabels(t *testing.T) {
+	doneID := uuid.New()
+	statuses := []domain.WorkspaceStatus{
+		{ID: uuid.New(), Name: "Todo", Slug: "todo", Category: domain.StatusCategoryUnstarted},
+		{ID: doneID, Name: "Done", Slug: "done", Category: domain.StatusCategoryCompleted},
+	}
+	svc, _ := newTokenService(t, "")
+	svc.statusRepo = &stubStatusLabelRepo{statuses: statuses, byID: map[uuid.UUID]*domain.WorkspaceStatus{
+		statuses[0].ID: &statuses[0],
+	}}
+	svc.issueRepo = &stubLabelIssueRepo{issue: &domain.Issue{
+		ID: uuid.New(), WorkspaceID: uuid.New(), Status: "todo",
+	}}
+	svc.historyRepo = &stubLabelHistoryRepo{}
+	svc.gtRepo = &stubTokenGiteaRepo{
+		inst: &domain.GiteaInstance{ID: uuid.New(), WorkspaceID: uuid.New(), InstanceURL: "http://127.0.0.1:1"},
+		repos: []domain.GiteaRepoModel{{
+			ID: uuid.New(), WorkspaceID: uuid.New(), GiteaRepoID: 1,
+			FullName: "octo/rocket", IsActive: true,
+		}},
+	}
+
+	var event giteaWebhookIssue
+	event.Issue.Number = 7
+	event.Issue.Labels = []giteaWebhookLabel{{Name: "Done"}}
+
+	inst := &domain.GiteaInstance{ID: uuid.New(), WorkspaceID: uuid.New()}
+	require.NoError(t, svc.syncStatusFromGiteaLabels(context.Background(), uuid.New(), inst, event))
+
+	issue := svc.issueRepo.(*stubLabelIssueRepo).issue
+	if assert.NotNil(t, issue.StatusID) {
+		assert.Equal(t, doneID, *issue.StatusID)
+	}
+	assert.Equal(t, domain.IssueStatus("done"), issue.Status)
+	require.Len(t, svc.historyRepo.(*stubLabelHistoryRepo).entries, 1, "status change is recorded in history")
+}
+
+type stubStatusLabelRepo struct {
+	repository.StatusRepo
+	statuses []domain.WorkspaceStatus
+	byID     map[uuid.UUID]*domain.WorkspaceStatus
+}
+
+func (r *stubStatusLabelRepo) ListByWorkspace(_ context.Context, _ uuid.UUID) ([]domain.WorkspaceStatus, error) {
+	return r.statuses, nil
+}
+
+func (r *stubStatusLabelRepo) GetByID(_ context.Context, id uuid.UUID) (*domain.WorkspaceStatus, error) {
+	return r.byID[id], nil
+}
+
+type stubLabelIssueRepo struct {
+	repository.IssueRepo
+	issue *domain.Issue
+}
+
+func (r *stubLabelIssueRepo) GetByGiteaIssueIndex(_ context.Context, _ uuid.UUID, _ uuid.UUID, _ int64) (*domain.Issue, error) {
+	return r.issue, nil
+}
+
+func (r *stubLabelIssueRepo) Update(_ context.Context, issue *domain.Issue) error {
+	r.issue = issue
+	return nil
+}
+
+func (r *stubLabelIssueRepo) ListSubIssues(_ context.Context, _ uuid.UUID) ([]domain.Issue, error) {
+	return nil, nil
+}
+
+func (r *stubLabelIssueRepo) CountSubIssues(_ context.Context, _ uuid.UUID) (int, int, error) {
+	return 0, 0, nil
+}
+
+type stubLabelHistoryRepo struct {
+	repository.IssueHistoryRepo
+	entries []string
+}
+
+func (r *stubLabelHistoryRepo) Create(_ context.Context, _, _ uuid.UUID, field string, _, _ *string) error {
+	r.entries = append(r.entries, field)
+	return nil
+}

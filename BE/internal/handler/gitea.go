@@ -194,7 +194,12 @@ func (h *GiteaHandler) AgentIssueLinks(c echo.Context) error {
 // HandleWebhook receives incoming Gitea webhook events (public endpoint).
 func (h *GiteaHandler) HandleWebhook(c echo.Context) error {
 	signature := c.Request().Header.Get("X-Gitea-Signature")
+	// Newer Gitea versions group label changes under the generic `issues`
+	// event and disambiguate through X-Gitea-Event-Type (e.g. issue_label).
 	eventType := c.Request().Header.Get("X-Gitea-Event")
+	if specific := c.Request().Header.Get("X-Gitea-Event-Type"); eventType == "issues" && specific == "issue_label" {
+		eventType = specific
+	}
 
 	body, err := io.ReadAll(c.Request().Body)
 	if err != nil {

@@ -233,6 +233,71 @@ func (c *Client) DeleteIssueComment(owner, repo string, commentID int64) error {
 	return c.doDelete(fmt.Sprintf("/api/v1/repos/%s/%s/issues/comments/%d", owner, repo, commentID))
 }
 
+// ListLabels returns every label defined on a repository.
+func (c *Client) ListLabels(owner, repo string) ([]Label, error) {
+	var all []Label
+	for page := 1; ; page++ {
+		var labels []Label
+		url := fmt.Sprintf("/api/v1/repos/%s/%s/labels?limit=50&page=%d", owner, repo, page)
+		if err := c.doGet(url, &labels); err != nil {
+			return nil, err
+		}
+		all = append(all, labels...)
+		if len(labels) < 50 {
+			return all, nil
+		}
+	}
+}
+
+// CreateLabel defines a new label on a repository.
+func (c *Client) CreateLabel(owner, repo, name, color, description string) (*Label, error) {
+	payload, err := json.Marshal(map[string]string{
+		"name": name, "color": color, "description": description,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var label Label
+	if err := c.doPost(fmt.Sprintf("/api/v1/repos/%s/%s/labels", owner, repo), payload, &label); err != nil {
+		return nil, err
+	}
+	return &label, nil
+}
+
+// GetIssueLabels returns the labels currently attached to an issue.
+func (c *Client) GetIssueLabels(owner, repo string, issueIndex int) ([]Label, error) {
+	var all []Label
+	for page := 1; ; page++ {
+		var labels []Label
+		url := fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d/labels?limit=50&page=%d", owner, repo, issueIndex, page)
+		if err := c.doGet(url, &labels); err != nil {
+			return nil, err
+		}
+		all = append(all, labels...)
+		if len(labels) < 50 {
+			return all, nil
+		}
+	}
+}
+
+// AddIssueLabels attaches existing labels to an issue.
+func (c *Client) AddIssueLabels(owner, repo string, issueIndex int, labelIDs []int64) error {
+	if len(labelIDs) == 0 {
+		return nil
+	}
+	payload, err := json.Marshal(map[string][]int64{"labels": labelIDs})
+	if err != nil {
+		return err
+	}
+	var labels []Label
+	return c.doPost(fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d/labels", owner, repo, issueIndex), payload, &labels)
+}
+
+// RemoveIssueLabel detaches a label from an issue.
+func (c *Client) RemoveIssueLabel(owner, repo string, issueIndex, labelID int64) error {
+	return c.doDelete(fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d/labels/%d", owner, repo, issueIndex, labelID))
+}
+
 // doDelete is a helper for authenticated DELETE requests.
 func (c *Client) doDelete(urlPath string) error {
 	fullURL := c.baseURL + urlPath
@@ -366,4 +431,13 @@ type GiteaComment struct {
 	HTMLURL   string     `json:"html_url"`
 	CreatedAt time.Time  `json:"created_at"`
 	UpdatedAt time.Time  `json:"updated_at"`
+}
+
+// Label represents a repository or issue label on Gitea.
+type Label struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	Color       string `json:"color"`
+	Description string `json:"description"`
+	URL         string `json:"url"`
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -469,6 +470,9 @@ func (s *GiteaService) HandleWebhookEvent(ctx context.Context, workspaceID uuid.
 		return s.processPushEvent(ctx, workspaceID, payload)
 	case "issues":
 		return s.processIssuesEvent(ctx, workspaceID, payload)
+	case "issue_label":
+		// Label changes are the incoming half of the status/label equivalence.
+		return s.processIssuesEvent(ctx, workspaceID, payload)
 	case "issue_comment", "comment":
 		return s.processIssueCommentEvent(ctx, workspaceID, payload)
 	default:
@@ -732,6 +736,7 @@ type giteaWebhookIssue struct {
 		Title  string `json:"title"`
 		Body   string `json:"body"`
 		State  string `json:"state"`
+		Labels []giteaWebhookLabel `json:"labels"`
 	} `json:"issue"`
 	Repository struct {
 		ID       int64  `json:"id"`
@@ -740,6 +745,13 @@ type giteaWebhookIssue struct {
 	Sender struct {
 		Login string `json:"login"`
 	} `json:"sender"`
+}
+
+// giteaWebhookLabel is the label shape embedded in issue webhook payloads.
+type giteaWebhookLabel struct {
+	ID    int64  `json:"id"`
+	Name  string `json:"name"`
+	Color string `json:"color"`
 }
 
 func (s *GiteaService) processIssuesEvent(ctx context.Context, workspaceID uuid.UUID, payload []byte) error {
@@ -771,9 +783,78 @@ func (s *GiteaService) processIssuesEvent(ctx context.Context, workspaceID uuid.
 		return s.syncIssueFromGiteaClose(ctx, workspaceID, inst, event)
 	case "reopened":
 		return s.syncIssueFromGiteaReopen(ctx, workspaceID, inst, event)
+	// Label changes make Gitea labels and Kuayle statuses equivalent in both
+	// directions: whichever status label is present becomes the issue status.
+	case "labeled", "unlabeled", "label_updated", "label_cleared", "label_changed":
+		return s.syncStatusFromGiteaLabels(ctx, workspaceID, inst, event)
 	default:
 		return nil
 	}
+}
+
+// syncStatusFromGiteaLabels applies label changes made in Gitea to the issue
+// status in Kuayle. The first label matching a workspace status (by name or
+// slug, case-insensitively) wins; when no status label is present the current
+// status is left untouched. The outgoing sync is then run to normalize the
+// label set (e.g. drop a stale status label the user left in place).
+func (s *GiteaService) syncStatusFromGiteaLabels(ctx context.Context, workspaceID uuid.UUID, inst *domain.GiteaInstance, event giteaWebhookIssue) error {
+	issue, err := s.issueRepo.GetByGiteaIssueIndex(ctx, workspaceID, inst.ID, event.Issue.Number)
+	if err != nil || issue == nil {
+		return nil
+	}
+
+	statuses, err := s.statusRepo.ListByWorkspace(ctx, workspaceID)
+	if err != nil || len(statuses) == 0 {
+		return nil
+	}
+
+	target := statusForLabels(statuses, event.Issue.Labels, issue.StatusID)
+	if target == nil {
+		return nil // no status label on the issue: keep the current status
+	}
+	if issue.StatusID != nil && *issue.StatusID == target.ID && issue.Status == domain.IssueStatus(target.Slug) {
+		return s.SyncIssueStatusLabelsToGitea(ctx, issue) // still normalize duplicate labels
+	}
+
+	old := string(issue.Status)
+	issue.StatusID = &target.ID
+	issue.Status = domain.IssueStatus(target.Slug)
+	if err := s.issueRepo.Update(ctx, issue); err != nil {
+		log.WithError(err).WithField("issue_id", issue.ID).Warn("failed to sync status from Gitea labels")
+		return nil
+	}
+	_ = s.historyRepo.Create(ctx, issue.ID, uuid.Nil, "status", &old, &target.Slug)
+
+	s.broadcastRealtimeEvent(workspaceID, realtime.Event{
+		Type:    "issue.updated",
+		Payload: issue,
+	})
+	s.broadcastAppRefresh(workspaceID, "issues")
+	s.applyStatusAutomation(ctx, workspaceID, issue, map[uuid.UUID]bool{})
+	return s.SyncIssueStatusLabelsToGitea(ctx, issue)
+}
+
+// statusForLabels returns the workspace status named by one of the Gitea
+// labels (matching status name or slug, case-insensitively), or nil when no
+// label refers to a status. When several status labels are present it prefers
+// one that differs from the current status, so the label the user just added
+// wins over the stale one.
+func statusForLabels(statuses []domain.WorkspaceStatus, labels []giteaWebhookLabel, currentID *uuid.UUID) *domain.WorkspaceStatus {
+	var firstMatch *domain.WorkspaceStatus
+	for _, label := range labels {
+		for i := range statuses {
+			if !strings.EqualFold(statuses[i].Name, label.Name) && !strings.EqualFold(statuses[i].Slug, label.Name) {
+				continue
+			}
+			if currentID == nil || statuses[i].ID != *currentID {
+				return &statuses[i]
+			}
+			if firstMatch == nil {
+				firstMatch = &statuses[i]
+			}
+		}
+	}
+	return firstMatch
 }
 
 func (s *GiteaService) syncIssueFromGiteaOpen(ctx context.Context, workspaceID uuid.UUID, inst *domain.GiteaInstance, repo *domain.GiteaRepoModel, event giteaWebhookIssue) error {
@@ -841,7 +922,8 @@ func (s *GiteaService) syncIssueFromGiteaOpen(ctx context.Context, workspaceID u
 		Payload: issue,
 	})
 	s.broadcastAppRefresh(workspaceID, "issues")
-	return nil
+	// The issue may already carry status labels when it is opened in Gitea.
+	return s.syncStatusFromGiteaLabels(ctx, workspaceID, inst, event)
 }
 
 func (s *GiteaService) syncIssueFromGiteaEdit(ctx context.Context, workspaceID uuid.UUID, inst *domain.GiteaInstance, event giteaWebhookIssue) error {
@@ -887,6 +969,8 @@ func (s *GiteaService) syncIssueFromGiteaClose(ctx context.Context, workspaceID 
 		Payload: issue,
 	})
 	s.broadcastAppRefresh(workspaceID, "issues")
+	// Keep the Gitea label equivalent to the status the close produced.
+	s.syncStatusLabel(ctx, issue)
 	return nil
 }
 
@@ -911,6 +995,8 @@ func (s *GiteaService) syncIssueFromGiteaReopen(ctx context.Context, workspaceID
 		Payload: issue,
 	})
 	s.broadcastAppRefresh(workspaceID, "issues")
+	// Keep the Gitea label equivalent to the status the reopen produced.
+	s.syncStatusLabel(ctx, issue)
 	return nil
 }
 
@@ -1186,6 +1272,134 @@ func (s *GiteaService) SyncIssueReopenToGitea(ctx context.Context, issue *domain
 	return nil
 }
 
+// SyncIssueStatusLabelsToGitea mirrors the issue status in Kuayle as an
+// exclusive label on the Gitea issue, keeping statuses and Gitea labels
+// equivalent in both directions. It is idempotent and only writes when the
+// remote label set differs, which is what keeps webhook round-trips from
+// looping (our own label writes come back as issue_label events that find
+// nothing left to change).
+func (s *GiteaService) SyncIssueStatusLabelsToGitea(ctx context.Context, issue *domain.Issue) error {
+	if issue == nil || issue.GiteaIssueIndex == nil {
+		return nil
+	}
+	statuses, err := s.statusRepo.ListByWorkspace(ctx, issue.WorkspaceID)
+	if err != nil || len(statuses) == 0 {
+		return nil
+	}
+	current := currentStatusForIssue(issue, statuses)
+	if current == nil {
+		return nil
+	}
+	repo, inst, err := s.getRepoForIssue(ctx, issue)
+	if err != nil {
+		return nil // not linked to Gitea
+	}
+	owner := strings.SplitN(repo.FullName, "/", 2)
+	if len(owner) != 2 {
+		return nil
+	}
+	token, err := s.decryptToken(inst.AccessToken)
+	if err != nil {
+		return nil
+	}
+	client := gt.NewClient(inst.InstanceURL, token)
+	issueIndex := int(*issue.GiteaIssueIndex)
+
+	// Every workspace status name/slug counts as a "status label"; anything
+	// else on the issue (e.g. "bug") is left untouched.
+	statusLabels := make(map[string]bool, len(statuses)*2)
+	for i := range statuses {
+		statusLabels[strings.ToLower(statuses[i].Name)] = true
+		statusLabels[strings.ToLower(statuses[i].Slug)] = true
+	}
+
+	target, err := ensureStatusLabel(client, owner[0], owner[1], current)
+	if err != nil {
+		return err
+	}
+
+	remote, err := client.GetIssueLabels(owner[0], owner[1], issueIndex)
+	if err != nil {
+		return fmt.Errorf("listing Gitea issue labels: %w", err)
+	}
+	hasCurrent := false
+	for _, label := range remote {
+		if label.ID == target.ID {
+			hasCurrent = true
+			continue
+		}
+		if statusLabels[strings.ToLower(label.Name)] {
+			if err := client.RemoveIssueLabel(owner[0], owner[1], int64(issueIndex), label.ID); err != nil {
+				log.WithError(err).WithField("issue_id", issue.ID).WithField("label", label.Name).
+					Warn("failed to remove stale status label from Gitea issue")
+			}
+		}
+	}
+	if !hasCurrent {
+		if err := client.AddIssueLabels(owner[0], owner[1], issueIndex, []int64{target.ID}); err != nil {
+			return fmt.Errorf("adding status label to Gitea issue: %w", err)
+		}
+	}
+	return nil
+}
+
+// syncStatusLabel runs the status-label sync and only logs failures, so it can
+// be called from paths where a label hiccup must not break the status update.
+func (s *GiteaService) syncStatusLabel(ctx context.Context, issue *domain.Issue) {
+	if err := s.SyncIssueStatusLabelsToGitea(ctx, issue); err != nil {
+		log.WithError(err).WithField("issue_id", issue.ID).Warn("failed to sync status label to Gitea")
+	}
+}
+
+// currentStatusForIssue resolves the workspace status the issue is on,
+// preferring the status_id column and falling back to the legacy slug field.
+func currentStatusForIssue(issue *domain.Issue, statuses []domain.WorkspaceStatus) *domain.WorkspaceStatus {
+	if issue.StatusID != nil {
+		for i := range statuses {
+			if statuses[i].ID == *issue.StatusID {
+				return &statuses[i]
+			}
+		}
+	}
+	for i := range statuses {
+		if statuses[i].Slug == string(issue.Status) {
+			return &statuses[i]
+		}
+	}
+	return nil
+}
+
+// ensureStatusLabel returns the repo label equivalent to the given status,
+// creating it when it does not exist yet.
+func ensureStatusLabel(client *gt.Client, owner, repo string, status *domain.WorkspaceStatus) (*gt.Label, error) {
+	labels, err := client.ListLabels(owner, repo)
+	if err != nil {
+		return nil, fmt.Errorf("listing Gitea repo labels: %w", err)
+	}
+	for i := range labels {
+		if strings.EqualFold(labels[i].Name, status.Name) {
+			return &labels[i], nil
+		}
+	}
+	created, err := client.CreateLabel(owner, repo, status.Name, giteaLabelColor(status.Color), "Kuayle status")
+	if err != nil {
+		return nil, fmt.Errorf("creating Gitea status label: %w", err)
+	}
+	return created, nil
+}
+
+// giteaLabelColor converts a Kuayle status color ("#ef4444") to the plain
+// six-hex-digit form Gitea expects, falling back to its default gray.
+func giteaLabelColor(color *string) string {
+	if color != nil {
+		c := strings.TrimPrefix(strings.TrimSpace(*color), "#")
+		if _, err := strconv.ParseUint(c, 16, 32); err == nil && len(c) == 6 {
+			return c
+		}
+	}
+	return "ededed"
+}
+
 // SyncCommentToGitea creates a comment in Gitea when a comment is created in
 // Kuayle, storing the returned Gitea comment ID so it can be edited or deleted
 // later. The comment is posted with the author's own Gitea token so it appears
@@ -1335,6 +1549,7 @@ func (s *GiteaService) applyAutoTransition(ctx context.Context, workspaceID uuid
 		Type:    "issue.updated",
 		Payload: issue,
 	})
+	s.syncStatusLabel(ctx, issue)
 	s.applyStatusAutomation(ctx, workspaceID, issue, map[uuid.UUID]bool{})
 }
 
@@ -1400,6 +1615,7 @@ func (s *GiteaService) moveIssueToCompleted(ctx context.Context, workspaceID uui
 	newVal := completedStatus.Slug
 	_ = s.historyRepo.Create(ctx, issue.ID, uuid.Nil, "status", &old, &newVal)
 	s.broadcastRealtimeEvent(workspaceID, realtime.Event{Type: "issue.updated", Payload: issue})
+	s.syncStatusLabel(ctx, issue)
 	s.applyStatusAutomation(ctx, workspaceID, issue, visited)
 }
 
