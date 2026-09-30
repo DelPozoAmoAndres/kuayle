@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"io"
 	"net/http"
 
@@ -9,6 +10,7 @@ import (
 	"github.com/kuayle/kuayle-backend/internal/dto"
 	"github.com/kuayle/kuayle-backend/internal/service"
 	"github.com/kuayle/kuayle-backend/pkg/response"
+	"github.com/kuayle/kuayle-backend/pkg/validate"
 	"github.com/labstack/echo/v4"
 	log "github.com/sirupsen/logrus"
 )
@@ -94,6 +96,48 @@ func (h *GiteaHandler) UnlinkRepo(c echo.Context) error {
 		return response.Error(c, http.StatusBadRequest, "BAD_REQUEST", err.Error())
 	}
 	return response.Success(c, http.StatusOK, map[string]string{"status": "unlinked"})
+}
+
+// GetUserToken reports whether the caller has a Gitea token stored (the token
+// itself is never returned).
+func (h *GiteaHandler) GetUserToken(c echo.Context) error {
+	ws := c.Get("workspace").(*domain.Workspace)
+	userID := c.Get("user_id").(uuid.UUID)
+	user, err := h.gtSvc.GetUserToken(c.Request().Context(), ws.ID, userID)
+	if err != nil || user == nil {
+		return response.InternalError(c)
+	}
+	return response.Success(c, http.StatusOK, map[string]any{
+		"has_gitea_token": user.GiteaToken != nil && *user.GiteaToken != "",
+		"gitea_login":     user.GiteaLogin,
+	})
+}
+
+// SetUserToken stores (or clears, with an empty token) the caller's own Gitea
+// PAT so comments are posted on their behalf.
+func (h *GiteaHandler) SetUserToken(c echo.Context) error {
+	ws := c.Get("workspace").(*domain.Workspace)
+	userID := c.Get("user_id").(uuid.UUID)
+
+	var req dto.GiteaUserTokenRequest
+	if err := c.Bind(&req); err != nil {
+		return response.Error(c, http.StatusBadRequest, "BAD_REQUEST", "Invalid request body")
+	}
+	if err := validate.Struct(&req); err != nil {
+		return response.Error(c, http.StatusBadRequest, "BAD_REQUEST", "Token is too long")
+	}
+
+	user, err := h.gtSvc.SetUserToken(c.Request().Context(), ws.ID, userID, req.Token)
+	if errors.Is(err, service.ErrInvalidGiteaToken) {
+		return response.Error(c, http.StatusBadRequest, "INVALID_GITEA_TOKEN", err.Error())
+	}
+	if err != nil || user == nil {
+		return response.InternalError(c)
+	}
+	return response.Success(c, http.StatusOK, map[string]any{
+		"has_gitea_token": user.GiteaToken != nil && *user.GiteaToken != "",
+		"gitea_login":     user.GiteaLogin,
+	})
 }
 
 // ListAutoTransitions returns the auto-transition rules.

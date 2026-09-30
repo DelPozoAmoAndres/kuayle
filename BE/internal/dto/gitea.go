@@ -14,6 +14,12 @@ type LinkGiteaReposRequest struct {
 	GiteaRepoIDs []int64 `json:"gitea_repo_ids" validate:"required,min=1"`
 }
 
+// GiteaUserTokenRequest stores (or, with an empty token, clears) the caller's
+// own Gitea PAT so comments are posted on their behalf.
+type GiteaUserTokenRequest struct {
+	Token string `json:"token" validate:"max=500"`
+}
+
 // --- Responses ---
 
 type GiteaStatusResponse struct {

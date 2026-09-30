@@ -73,7 +73,7 @@
 	let projects = $state<Project[]>([]);
 	let newComment = $state('');
 	let commentVersion = $state(0);
-	let giteaLoginRequired = $state(false);
+	let giteaTokenRequired = $state(false);
 	let replyGiteaRequired = $state<Record<string, boolean>>({});
 	let replyContents = $state<Record<string, string>>({});
 	let replyVersions = $state<Record<string, number>>({});
@@ -440,8 +440,8 @@
 		}
 	}
 
-	function isGiteaLoginRequired(err: unknown): boolean {
-		return (err as { error?: { code?: string } } | null)?.error?.code === 'GITEA_LOGIN_REQUIRED';
+	function isGiteaTokenRequired(err: unknown): boolean {
+		return (err as { error?: { code?: string } } | null)?.error?.code === 'GITEA_TOKEN_REQUIRED';
 	}
 
 	async function handleAddComment() {
@@ -450,12 +450,12 @@
 			lastLocalUpdate = Date.now();
 			await createComment(slug, issue.identifier, newComment);
 			newComment = '';
-			giteaLoginRequired = false;
+			giteaTokenRequired = false;
 			commentVersion++;
 			refreshActivity();
 		} catch (err: any) {
-			if (isGiteaLoginRequired(err)) {
-				giteaLoginRequired = true;
+			if (isGiteaTokenRequired(err)) {
+				giteaTokenRequired = true;
 			} else {
 				appToast.apiError(err, m['issue.toast.failed_comment']());
 			}
@@ -474,7 +474,7 @@
 			replyGiteaRequired = { ...replyGiteaRequired };
 			refreshActivity();
 		} catch (err: any) {
-			if (isGiteaLoginRequired(err)) {
+			if (isGiteaTokenRequired(err)) {
 				replyGiteaRequired[parentId] = true;
 				replyGiteaRequired = { ...replyGiteaRequired };
 			} else {
@@ -1219,12 +1219,12 @@
 								<div class="border-t border-[var(--app-border)] px-4 py-3 flex flex-wrap items-start gap-3">
 									{#if replyGiteaRequired[comment.id]}
 										<div class="flex w-full flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
-											<span class="text-xs text-amber-200">{m['issue.gitea_login_required']()}</span>
+											<span class="text-xs text-amber-200">{m['issue.gitea_token_required']()}</span>
 											<a
 												href={`/${slug}/settings/profile`}
 												class="rounded-md border border-amber-500/50 px-2 py-1 text-xs font-medium text-amber-100 transition-colors hover:bg-amber-500/20"
 											>
-												{m['issue.gitea_login_required_action']()}
+												{m['issue.gitea_token_required_action']()}
 											</a>
 										</div>
 									{/if}
@@ -1279,14 +1279,14 @@
 							{/each}
 						</div>
 					{/if}
-					{#if giteaLoginRequired}
+					{#if giteaTokenRequired}
 						<div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2">
-							<span class="text-xs text-amber-200">{m['issue.gitea_login_required']()}</span>
+							<span class="text-xs text-amber-200">{m['issue.gitea_token_required']()}</span>
 							<a
 								href={`/${slug}/settings/profile`}
 								class="rounded-md border border-amber-500/50 px-2 py-1 text-xs font-medium text-amber-100 transition-colors hover:bg-amber-500/20"
 							>
-								{m['issue.gitea_login_required_action']()}
+								{m['issue.gitea_token_required_action']()}
 							</a>
 						</div>
 					{/if}
@@ -1303,7 +1303,7 @@
 								uploadUrl={imageUploadUrl}
 								{members}
 								issues={issuesState.issues}
-								onupdate={(html) => { newComment = html; if (giteaLoginRequired) giteaLoginRequired = false; }}
+								onupdate={(html) => { newComment = html; if (giteaTokenRequired) giteaTokenRequired = false; }}
 								onsubmit={handleAddComment}
 								remoteCursors={getRemoteCursors('new-comment')}
 								onfocus={() => presenceState.sendFocus(issue.id, 'new-comment', 0)}

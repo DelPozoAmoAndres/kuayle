@@ -36,3 +36,17 @@ export function listGiteaAutoTransitions(slug: string): Promise<GiteaAutoTransit
 export function updateGiteaAutoTransitions(slug: string, transitions: GiteaAutoTransition[]): Promise<void> {
 	return api.patch<void>(`/api/workspaces/${slug}/gitea/auto-transitions`, { transitions });
 }
+
+export interface GiteaUserTokenState {
+	has_gitea_token: boolean;
+	gitea_login?: string | null;
+}
+
+export function getGiteaUserToken(slug: string): Promise<GiteaUserTokenState> {
+	return api.get<GiteaUserTokenState>(`/api/workspaces/${slug}/gitea/user-token`);
+}
+
+/** Stores the user's own Gitea token; an empty token clears it. */
+export function setGiteaUserToken(slug: string, token: string): Promise<GiteaUserTokenState> {
+	return api.put<GiteaUserTokenState>(`/api/workspaces/${slug}/gitea/user-token`, { token });
+}

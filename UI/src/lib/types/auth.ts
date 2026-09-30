@@ -6,6 +6,7 @@ export interface User {
 	avatar_url: string | null;
 	is_sysadmin: boolean;
 	gitea_login?: string | null;
+	has_gitea_token?: boolean;
 }
 
 export interface LoginRequest {
@@ -23,5 +24,4 @@ export interface UpdateProfileRequest {
 	name?: string;
 	display_name?: string;
 	avatar_url?: string | null;
-	gitea_login?: string | null;
 }

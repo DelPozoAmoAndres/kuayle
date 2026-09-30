@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"unicode"
 
@@ -23,11 +22,7 @@ var (
 	ErrEmailTaken         = errors.New("email already taken")
 	ErrInvalidToken       = errors.New("invalid or expired token")
 	ErrWeakPassword       = errors.New("password must contain at least one uppercase letter, one lowercase letter, and one digit")
-	ErrInvalidGiteaLogin  = errors.New("gitea login may only contain letters, numbers, dots, underscores and hyphens (1-100 characters)")
 )
-
-// giteaLoginPattern matches the accepted format of a linked Gitea account.
-var giteaLoginPattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,100}$`)
 
 type AuthService struct {
 	userRepo    repository.UserRepo
@@ -194,17 +189,6 @@ func (s *AuthService) UpdateProfile(ctx context.Context, id uuid.UUID, req dto.U
 		} else {
 			trimmed := strings.TrimSpace(*req.AvatarURL.Value)
 			user.AvatarURL = &trimmed
-		}
-	}
-	if req.GiteaLogin != nil {
-		trimmed := strings.TrimSpace(*req.GiteaLogin)
-		if trimmed == "" {
-			// Clearing the field unlinks the Gitea account.
-			user.GiteaLogin = nil
-		} else if !giteaLoginPattern.MatchString(trimmed) {
-			return nil, ErrInvalidGiteaLogin
-		} else {
-			user.GiteaLogin = &trimmed
 		}
 	}
 	if user.DisplayName == "" {

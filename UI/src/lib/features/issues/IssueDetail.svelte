@@ -29,7 +29,7 @@
 	let comments = $state<Comment[]>([]);
 	let history = $state<IssueHistory[]>([]);
 	let newComment = $state('');
-	let giteaLoginRequired = $state(false);
+	let giteaTokenRequired = $state(false);
 	let tab = $state<'comments' | 'activity'>('comments');
 	let statusOpen = $state(false);
 	let priorityOpen = $state(false);
@@ -109,8 +109,8 @@
 		window.removeEventListener('ws:comment-deleted', onCommentDeleted);
 	});
 
-	function isGiteaLoginRequired(err: unknown): boolean {
-		return (err as { error?: { code?: string } } | null)?.error?.code === 'GITEA_LOGIN_REQUIRED';
+	function isGiteaTokenRequired(err: unknown): boolean {
+		return (err as { error?: { code?: string } } | null)?.error?.code === 'GITEA_TOKEN_REQUIRED';
 	}
 
 	async function handleAddComment(e: Event) {
@@ -120,11 +120,11 @@
 			const comment = await createComment(slug, issue.identifier, newComment);
 			comments = [...comments, comment];
 			newComment = '';
-			giteaLoginRequired = false;
+			giteaTokenRequired = false;
 			appToast.success('Comment added');
 		} catch (err: any) {
-			if (isGiteaLoginRequired(err)) {
-				giteaLoginRequired = true;
+			if (isGiteaTokenRequired(err)) {
+				giteaTokenRequired = true;
 			} else {
 				appToast.apiError(err, 'Failed to add comment');
 			}
@@ -306,21 +306,21 @@
 					{/each}
 
 					<form onsubmit={handleAddComment} class="sticky bottom-0 -mx-4 flex flex-wrap gap-2 border-t border-[var(--app-border)] bg-[var(--color-bg)] px-4 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:p-0">
-						{#if giteaLoginRequired}
+						{#if giteaTokenRequired}
 							<div class="flex w-full flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2">
-								<span class="text-xs text-amber-200">{m['issue.gitea_login_required']()}</span>
+								<span class="text-xs text-amber-200">{m['issue.gitea_token_required']()}</span>
 								<a
 									href={`/${slug}/settings/profile`}
 									class="rounded-md border border-amber-500/50 px-2 py-1 text-xs font-medium text-amber-100 transition-colors hover:bg-amber-500/20"
 								>
-									{m['issue.gitea_login_required_action']()}
+									{m['issue.gitea_token_required_action']()}
 								</a>
 							</div>
 						{/if}
 						<input
 							type="text"
 							bind:value={newComment}
-							oninput={() => { if (giteaLoginRequired) giteaLoginRequired = false; }}
+							oninput={() => { if (giteaTokenRequired) giteaTokenRequired = false; }}
 							placeholder="Write a comment..."
 							class="flex-1 rounded border border-[var(--app-border)] bg-[var(--color-bg-secondary)] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--app-accent)]"
 						/>

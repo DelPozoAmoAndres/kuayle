@@ -479,8 +479,8 @@ func (h *IssueHandler) CreateComment(c echo.Context) error {
 
 	comment, err := h.commentSvc.Create(c.Request().Context(), ws.ID, issue.ID, userID, req)
 	if err != nil {
-		if errors.Is(err, service.ErrGiteaLoginRequired) {
-			return response.Error(c, http.StatusConflict, "GITEA_LOGIN_REQUIRED", err.Error())
+		if errors.Is(err, service.ErrGiteaTokenRequired) {
+			return response.Error(c, http.StatusConflict, "GITEA_TOKEN_REQUIRED", err.Error())
 		}
 		return response.InternalError(c)
 	}

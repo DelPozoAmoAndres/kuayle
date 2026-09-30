@@ -16,9 +16,13 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// ErrGiteaLoginRequired is returned when a user tries to comment in a
-// workspace connected to Gitea without having linked their Gitea account.
-var ErrGiteaLoginRequired = errors.New("add your Gitea account in your profile to comment in this workspace")
+var (
+	// ErrGiteaTokenRequired is returned when a user tries to comment in a
+	// workspace connected to Gitea without a linked Gitea token.
+	ErrGiteaTokenRequired = errors.New("add your Gitea token in your profile to comment in this workspace")
+	// ErrInvalidGiteaToken is returned when a user token fails verification.
+	ErrInvalidGiteaToken = errors.New("the Gitea token was rejected by the instance")
+)
 
 // giteaCommentSync is the subset of GiteaService the comment flow needs. Using
 // a narrow interface keeps the initialization order flexible (it is injected
@@ -76,15 +80,14 @@ func (s *CommentService) Create(ctx context.Context, workspaceID, issueID, userI
 		return nil, err
 	}
 
-	// In workspaces connected to Gitea the commenter must have linked their
-	// Gitea account, otherwise the comment could not be attributed on the
-	// Gitea side.
+	// In workspaces connected to Gitea the commenter must have linked their own
+	// Gitea token, otherwise the comment could not be posted on their behalf.
 	if s.gitea != nil {
 		connected, err := s.gitea.HasGiteaInstance(ctx, workspaceID)
 		if err != nil {
 			log.WithError(err).WithField("workspace_id", workspaceID).Warn("failed to check Gitea instance before commenting")
-		} else if connected && (user == nil || user.GiteaLogin == nil || strings.TrimSpace(*user.GiteaLogin) == "") {
-			return nil, ErrGiteaLoginRequired
+		} else if connected && (user == nil || user.GiteaToken == nil || strings.TrimSpace(*user.GiteaToken) == "") {
+			return nil, ErrGiteaTokenRequired
 		}
 	}
 

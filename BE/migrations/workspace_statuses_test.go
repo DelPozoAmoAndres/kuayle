@@ -101,7 +101,15 @@ func TestWorkspaceStatusesMigrationWithExistingData(t *testing.T) {
 	requireColumnExists(t, db, "comments", "gitea_comment_id")
 	require.True(t, columnNullable(t, db, "comments", "user_id"), "comments.user_id must be nullable")
 
-	// Roll back both migrations and restore the previous contract.
+	// 000041 — per-user Gitea token.
+	require.NoError(t, migrator.Steps(1))
+	requireMigrationVersion(t, migrator, 41)
+	requireColumnExists(t, db, "users", "gitea_token")
+
+	// Roll back every migration added since 38 and restore the previous contract.
+	require.NoError(t, migrator.Steps(-1))
+	requireMigrationVersion(t, migrator, 40)
+	requireColumnMissing(t, db, "users", "gitea_token")
 	require.NoError(t, migrator.Steps(-1))
 	requireMigrationVersion(t, migrator, 39)
 	require.NoError(t, migrator.Steps(-1))

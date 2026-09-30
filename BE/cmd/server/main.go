@@ -364,6 +364,9 @@ func main() {
 	ws.GET("/gitea/repos", giteaH.ListRepos, mw.RequirePermission("project:manage"))
 	ws.POST("/gitea/repos", giteaH.LinkRepos, mw.RequirePermission("project:manage"))
 	ws.DELETE("/gitea/repos/:id", giteaH.UnlinkRepo, mw.RequirePermission("project:manage"))
+	// Personal credential: any workspace member manages their own Gitea token.
+	ws.GET("/gitea/user-token", giteaH.GetUserToken)
+	ws.PUT("/gitea/user-token", giteaH.SetUserToken)
 	ws.GET("/gitea/auto-transitions", giteaH.ListAutoTransitions)
 	ws.PATCH("/gitea/auto-transitions", giteaH.UpdateAutoTransitions, mw.RequirePermission("workspace:manage"))
 	ws.GET("/issues/:identifier/gitea", giteaH.IssueGiteaActivity)

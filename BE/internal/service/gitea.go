@@ -328,6 +328,63 @@ func (s *GiteaService) UnlinkRepo(ctx context.Context, repoID uuid.UUID) error {
 	return s.gtRepo.DeleteRepo(ctx, repoID)
 }
 
+// GetUserToken returns the caller's stored Gitea credentials (token included
+// only in encrypted form on the user row; never exposed).
+func (s *GiteaService) GetUserToken(ctx context.Context, workspaceID, userID uuid.UUID) (*domain.User, error) {
+	_ = workspaceID
+	return s.userRepo.GetByID(ctx, userID)
+}
+
+// SetUserToken stores the caller's own Gitea PAT so their comments are posted
+// on their behalf instead of the workspace integration account. When the
+// workspace has a connected instance the token is verified against it, which
+// also derives the account login used to attribute incoming Gitea comments.
+// An empty token removes the stored credential.
+func (s *GiteaService) SetUserToken(ctx context.Context, workspaceID, userID uuid.UUID, token string) (*domain.User, error) {
+	user, err := s.userRepo.GetByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, fmt.Errorf("user not found")
+	}
+
+	trimmed := strings.TrimSpace(token)
+	if trimmed == "" {
+		user.GiteaToken = nil
+		user.GiteaLogin = nil
+		if err := s.userRepo.Update(ctx, user); err != nil {
+			return nil, err
+		}
+		return user, nil
+	}
+
+	inst, err := s.gtRepo.GetInstanceByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	login := user.GiteaLogin
+	if inst != nil {
+		verified, err := gt.NewClient(inst.InstanceURL, trimmed).VerifyConnection()
+		if err != nil {
+			return nil, ErrInvalidGiteaToken
+		}
+		login = &verified.Login
+	}
+
+	encrypted, err := crypto.Encrypt(trimmed, s.encryptionKey)
+	if err != nil {
+		return nil, fmt.Errorf("encrypting Gitea token: %w", err)
+	}
+	user.GiteaToken = &encrypted
+	user.GiteaLogin = login
+	if err := s.userRepo.Update(ctx, user); err != nil {
+		return nil, err
+	}
+	return user, nil
+}
+
 // Disconnect removes the Gitea instance.
 func (s *GiteaService) Disconnect(ctx context.Context, workspaceID uuid.UUID) error {
 	_ = s.gtRepo.DeleteOAuthConfig(ctx, workspaceID)
@@ -1131,7 +1188,9 @@ func (s *GiteaService) SyncIssueReopenToGitea(ctx context.Context, issue *domain
 
 // SyncCommentToGitea creates a comment in Gitea when a comment is created in
 // Kuayle, storing the returned Gitea comment ID so it can be edited or deleted
-// later. Like the issue sync, it is a no-op while processing a Gitea webhook.
+// later. The comment is posted with the author's own Gitea token so it appears
+// on their behalf instead of the workspace integration account. Like the issue
+// sync, it is a no-op while processing a Gitea webhook.
 func (s *GiteaService) SyncCommentToGitea(ctx context.Context, issue *domain.Issue, comment *domain.Comment) error {
 	if IsSyncingFromGitea(ctx) {
 		return nil
@@ -1148,8 +1207,9 @@ func (s *GiteaService) SyncCommentToGitea(ctx context.Context, issue *domain.Iss
 	if len(owner) != 2 {
 		return nil
 	}
-	token, err := s.decryptToken(inst.AccessToken)
+	token, err := s.authorToken(ctx, comment)
 	if err != nil {
+		log.WithError(err).WithField("comment_id", comment.ID).Warn("comment author has no usable Gitea token; skipping Gitea sync")
 		return nil
 	}
 
@@ -1169,6 +1229,22 @@ func (s *GiteaService) SyncCommentToGitea(ctx context.Context, issue *domain.Iss
 	}
 	log.WithField("gitea_comment_id", giteaCommentID).Info("created comment in Gitea")
 	return nil
+}
+
+// authorToken decrypts the Gitea token of the comment author so outgoing
+// comments are posted as them.
+func (s *GiteaService) authorToken(ctx context.Context, comment *domain.Comment) (string, error) {
+	if comment == nil || comment.UserID == nil {
+		return "", fmt.Errorf("comment has no local author")
+	}
+	user, err := s.userRepo.GetByID(ctx, *comment.UserID)
+	if err != nil {
+		return "", err
+	}
+	if user == nil || user.GiteaToken == nil || strings.TrimSpace(*user.GiteaToken) == "" {
+		return "", fmt.Errorf("user %s has no Gitea token", comment.UserID)
+	}
+	return s.decryptToken(*user.GiteaToken)
 }
 
 // SyncCommentDeleteToGitea deletes a comment in Gitea when it is deleted in
@@ -1192,8 +1268,9 @@ func (s *GiteaService) SyncCommentDeleteToGitea(ctx context.Context, issue *doma
 	if len(owner) != 2 {
 		return nil
 	}
-	token, err := s.decryptToken(inst.AccessToken)
+	token, err := s.authorToken(ctx, comment)
 	if err != nil {
+		log.WithError(err).WithField("comment_id", comment.ID).Warn("comment author has no usable Gitea token; skipping Gitea delete")
 		return nil
 	}
 

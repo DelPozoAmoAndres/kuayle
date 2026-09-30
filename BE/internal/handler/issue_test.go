@@ -512,7 +512,7 @@ func (f *fakeGiteaCommentSync) SyncCommentToGitea(context.Context, *domain.Issue
 	return nil
 }
 
-func TestIssueHandler_CreateComment_GiteaLoginRequired(t *testing.T) {
+func TestIssueHandler_CreateComment_GiteaTokenRequired(t *testing.T) {
 	e := echo.New()
 	issueRepo := newTestIssueRepo()
 	historyRepo := &testHistoryRepo{}
@@ -546,5 +546,5 @@ func TestIssueHandler_CreateComment_GiteaLoginRequired(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, http.StatusConflict, rec.Code)
-	assert.Contains(t, rec.Body.String(), "GITEA_LOGIN_REQUIRED")
+	assert.Contains(t, rec.Body.String(), "GITEA_TOKEN_REQUIRED")
 }

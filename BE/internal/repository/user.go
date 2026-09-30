@@ -75,8 +75,8 @@ func (r *UserRepository) GetByEmail(ctx context.Context, email string) (*domain.
 }
 
 func (r *UserRepository) Update(ctx context.Context, user *domain.User) error {
-	query := `UPDATE users SET name = $1, display_name = $2, avatar_url = $3, gitea_login = $4, updated_at = NOW() WHERE id = $5 RETURNING updated_at`
-	return r.db.QueryRowContext(ctx, query, user.Name, user.DisplayName, user.AvatarURL, user.GiteaLogin, user.ID).Scan(&user.UpdatedAt)
+	query := `UPDATE users SET name = $1, display_name = $2, avatar_url = $3, gitea_login = $4, gitea_token = $5, updated_at = NOW() WHERE id = $6 RETURNING updated_at`
+	return r.db.QueryRowContext(ctx, query, user.Name, user.DisplayName, user.AvatarURL, user.GiteaLogin, user.GiteaToken, user.ID).Scan(&user.UpdatedAt)
 }
 
 // GetWorkspaceMemberByGiteaLogin resolves a Gitea login to a workspace member.
