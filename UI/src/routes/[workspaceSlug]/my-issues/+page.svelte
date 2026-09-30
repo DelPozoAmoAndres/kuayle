@@ -23,7 +23,7 @@
 	import type { ViewFilter, ViewLayout } from '$lib/types/view';
 	import type { Issue, RelationType } from '$lib/types/issue';
 	import AddRelationDialog from '$lib/features/issues/AddRelationDialog.svelte';
-	import { CircleUser, PenLine } from 'lucide-svelte';
+	import { CircleUser, PenLine, Layers } from 'lucide-svelte';
 	import { createKeyboardHandler } from '$lib/utils/keyboard';
 	import BulkActionBar from '$lib/features/issues/BulkActionBar.svelte';
 	import { m } from '$lib/paraglide/messages.js';
@@ -31,7 +31,7 @@
 
 	const slug = $derived(page.params.workspaceSlug ?? '');
 
-	type MyTab = 'assigned' | 'created';
+	type MyTab = 'assigned' | 'created' | 'all';
 	const DRILL_DOWN_FILTERS = [
 		'status',
 		'status_type',
@@ -87,9 +87,10 @@
 		// Tab-specific filter
 		if (!drillDownMode && activeTab === 'assigned') {
 			params.assignee = authState.user.id;
-		} else if (!drillDownMode) {
+		} else if (!drillDownMode && activeTab === 'created') {
 			params.creator = authState.user.id;
 		}
+		// 'all' applies no implicit filter: every issue in the workspace.
 
 		// Apply user filters
 		for (const [key, value] of Object.entries(filters)) {
@@ -183,6 +184,13 @@
 				<PenLine size={13} class="mr-1" />
 				{m['my_issues.tab.created']()}
 			</Tabs.Trigger>
+			<Tabs.Trigger
+				value="all"
+				class="flex-none h-auto rounded-full border border-[var(--app-border)] px-2.5 py-1 text-xs text-[var(--color-text-tertiary)] shadow-none data-[state=active]:border-[var(--app-accent)]/30 data-[state=active]:bg-[var(--app-accent)]/10 data-[state=active]:text-[var(--app-accent-light)] data-[state=active]:shadow-none"
+			>
+				<Layers size={13} class="mr-1" />
+				{m['my_issues.tab.all']()}
+			</Tabs.Trigger>
 		</Tabs.List>
 	</Tabs.Root>
 
@@ -194,10 +202,16 @@
 		<div class="flex-1 overflow-y-auto">
 			{#if !issuesState.loading && issuesState.issues.length === 0}
 				<EmptyState
-					title={activeTab === 'assigned' ? m['my_issues.empty.assigned.title']() : m['my_issues.empty.created.title']()}
+					title={activeTab === 'assigned'
+						? m['my_issues.empty.assigned.title']()
+						: activeTab === 'created'
+							? m['my_issues.empty.created.title']()
+							: m['my_issues.empty.all.title']()}
 					description={activeTab === 'assigned'
 						? m['my_issues.empty.assigned.description']()
-						: m['my_issues.empty.created.description']()}
+						: activeTab === 'created'
+							? m['my_issues.empty.created.description']()
+							: m['my_issues.empty.all.description']()}
 				/>
 			{:else if issuesState.groupBy}
 				{#each issuesState.groupedIssues as group (group.key)}
