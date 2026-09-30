@@ -723,7 +723,9 @@ test('keeps multiple docked terminals alive across collapse and navigation', asy
 	await page.getByRole('tab').first().click();
 	await expect.poll(() => page.evaluate(() => [(window as any).__terminalSockets[3].closed, (window as any).__terminalSockets[4].closed])).toEqual([false, false]);
 
-	await page.getByRole('link', { name: 'Dev Machines' }).click();
+	// The sidebar no longer links to Dev Machines; go back through the
+	// machine-detail back link (still an SPA navigation).
+	await page.locator('header a[href="/test/machines"]').click();
 	await expect(page).toHaveURL(/\/test\/machines$/);
 	await expect(page.getByTestId('terminal-dock')).toBeVisible();
 	await expect(page.getByRole('tab')).toHaveCount(2);

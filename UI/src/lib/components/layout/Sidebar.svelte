@@ -15,8 +15,6 @@
 		};
 	}
 	import { authState } from '$lib/features/auth/auth.state.svelte';
-	import { demoMode } from '$lib/demo';
-	import { ROLE_HIERARCHY } from '$lib/security/roles';
 	import type { Workspace } from '$lib/types/workspace';
 	import type { View } from '$lib/types/view';
 	import { isPersonalView, isWorkspaceView } from '$lib/types/view';
@@ -101,11 +99,6 @@
 	function isActive(path: string): boolean {
 		return currentPath.startsWith(path);
 	}
-
-	const canManageDevMachines = $derived(
-		(!demoMode || authState.user?.is_sysadmin === true) &&
-		(ROLE_HIERARCHY[workspace.current_user_role as keyof typeof ROLE_HIERARCHY] ?? 0) >= ROLE_HIERARCHY.member
-	);
 
 	async function handleLogout() {
 		await logout();
@@ -645,17 +638,6 @@
 					<BarChart3 size={16} class="shrink-0" />
 					<span class="truncate">{m['sidebar.insights']()}</span>
 				</a>
-				{#if canManageDevMachines}
-				<a
-					href="/{slug}/machines"
-					class="flex items-center gap-2 rounded-md px-2 py-1 text-sm {isActive(`/${slug}/machines`)
-						? 'bg-[var(--color-bg-hover)]/50 text-[var(--color-text-primary)]'
-						: 'text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-text-primary)]'}"
-				>
-					<Box size={16} class="shrink-0" />
-					<span class="truncate">{m['sidebar.dev_machines']()}</span>
-				</a>
-				{/if}
 			</div>
 
 			<!-- Favorites -->
