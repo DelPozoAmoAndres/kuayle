@@ -2,16 +2,28 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
-	import { getProject, updateProject, deleteProject } from '$lib/api/projects';
+	import { getProject, updateProject, deleteProject, listProjects } from '$lib/api/projects';
+	import { listLabels } from '$lib/api/labels';
+	import { listMembers } from '$lib/api/members';
 	import { getWorkspace } from '$lib/api/workspaces';
 	import { hasPermission } from '$lib/security/permissions';
 	import type { Role } from '$lib/security/roles';
+	import { authState } from '$lib/features/auth/auth.state.svelte';
 	import { issuesState } from '$lib/features/issues/issues.state.svelte';
 	import { statusesState } from '$lib/features/issues/statuses.state.svelte';
 	import type { Project, ProjectStatus } from '$lib/types/project';
+	import type { Label as LabelType } from '$lib/types/label';
+	import type { WorkspaceMember } from '$lib/types/workspace';
+	import type { ViewFilter } from '$lib/types/view';
+	import type { Issue, RelationType } from '$lib/types/issue';
 	import IssueRow from '$lib/features/issues/IssueRow.svelte';
 	import IssueListLoadMore from '$lib/features/issues/IssueListLoadMore.svelte';
+	import IssueGroupHeader from '$lib/features/issues/IssueGroupHeader.svelte';
 	import IssueDetail from '$lib/features/issues/IssueDetail.svelte';
+	import BulkActionBar from '$lib/features/issues/BulkActionBar.svelte';
+	import AddRelationDialog from '$lib/features/issues/AddRelationDialog.svelte';
+	import FilterBuilder from '$lib/components/shared/FilterBuilder.svelte';
+	import * as Tabs from '$lib/components/ui/tabs';
 	import GanttChart from '$lib/features/projects/GanttChart.svelte';
 	import EmptyState from '$lib/components/shared/EmptyState.svelte';
 	import DatePickerPopover from '$lib/components/shared/DatePickerPopover.svelte';
@@ -41,7 +53,9 @@
 		BarChart3,
 		ChevronRight,
 		Box,
-		Settings2
+		Settings2,
+		CircleUser,
+		Layers
 	} from 'lucide-svelte';
 	import SidebarToggle from '$lib/components/layout/SidebarToggle.svelte';
 
@@ -53,7 +67,16 @@
 	let statusOpen = $state(false);
 	let actionsOpen = $state(false);
 	let viewMode = $state<'list' | 'gantt'>('list');
+	let issueTab = $state<'assigned' | 'all'>('assigned');
+	let filters = $state<ViewFilter>({});
+	let filterProjects = $state<Project[]>([]);
+	let labels = $state<LabelType[]>([]);
+	let members = $state<WorkspaceMember[]>([]);
+	let collapsedGroups = $state<Set<string>>(new Set());
 	let lastSelectedId = $state<string | null>(null);
+	let relationDialogOpen = $state(false);
+	let relationIssue = $state<Issue | null>(null);
+	let relationDefaultType = $state<RelationType>('related');
 	let developmentOpen = $state(false);
 	let developmentRepositories = $state<GitHubRepo[]>([]);
 	let developmentEnvironments = $state<DevMachineEnvironment[]>([]);
@@ -103,14 +126,79 @@
 		loading = true;
 		try {
 			project = await getProject(s, pid);
-			await issuesState.load(s, viewMode === 'gantt' ? { project: pid, per_page: '200' } : { project: pid });
+			await loadIssues(s, pid);
 			await statusesState.load(s);
+			// Filter metadata (labels, members, projects for the FilterBuilder chips).
+			void Promise.all([listProjects(s), listLabels(s), listMembers(s)]).then(([p, l, mem]) => {
+				filterProjects = p;
+				labels = l;
+				members = mem;
+			});
 		} catch {
 			appToast.error(m['projects.toast.not_found']());
 			goto(`/${slug}/projects`);
 		} finally {
 			loading = false;
 		}
+	}
+
+	async function loadIssues(s = slug, pid = projectId) {
+		if (!authState.user || !pid) return;
+		const params: Record<string, string> = {};
+
+		// Tab-specific implicit filter: 'assigned' defaults to my issues.
+		if (issueTab === 'assigned') {
+			params.assignee = authState.user.id;
+		}
+		// 'all' applies no implicit filter: every issue in the project.
+
+		// User filters from the FilterBuilder.
+		for (const [key, value] of Object.entries(filters)) {
+			if (value !== undefined && value !== '') {
+				params[key] = value;
+			}
+		}
+
+		// The project scope always wins over any filter value.
+		params.project = pid;
+
+		if (viewMode === 'gantt') {
+			params.per_page = '200';
+		} else {
+			// Grouped rendering by status, like the Issues page.
+			params.group_by = 'status';
+			params.sort = 'priority';
+			params.order = 'asc';
+		}
+
+		issuesState.groupBy = viewMode === 'list' ? 'status' : null;
+		await issuesState.load(s, params);
+	}
+
+	function handleIssueTabChange(tab: string) {
+		issueTab = tab === 'all' ? 'all' : 'assigned';
+		void loadIssues();
+	}
+
+	function handleFilterChange(f: ViewFilter) {
+		filters = f;
+		void loadIssues();
+	}
+
+	function toggleGroup(key: string) {
+		const next = new Set(collapsedGroups);
+		if (next.has(key)) {
+			next.delete(key);
+		} else {
+			next.add(key);
+		}
+		collapsedGroups = next;
+	}
+
+	function handleAddRelation(issue: Issue, type: RelationType) {
+		relationIssue = issue;
+		relationDefaultType = type;
+		relationDialogOpen = true;
 	}
 
 	$effect(() => {
@@ -261,14 +349,14 @@
 				<!-- View switcher -->
 				<div class="flex rounded-md border border-[var(--app-border)]">
 					<button
-						onclick={() => (viewMode = 'list')}
+						onclick={() => { if (viewMode !== 'list') { viewMode = 'list'; void loadIssues(); } }}
 						class="rounded-l-md px-2 py-1 {viewMode === 'list' ? 'bg-[var(--color-bg-hover)] text-[var(--color-text-primary)]' : 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-bg-hover)]'}"
 						title={m['projects.list_view']()}
 					>
 						<List size={14} />
 					</button>
 					<button
-						onclick={() => (viewMode = 'gantt')}
+						onclick={() => { if (viewMode !== 'gantt') { viewMode = 'gantt'; void loadIssues(); } }}
 						class="rounded-r-md px-2 py-1 {viewMode === 'gantt' ? 'bg-[var(--color-bg-hover)] text-[var(--color-text-primary)]' : 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-bg-hover)]'}"
 						title={m['projects.gantt_view']()}
 					>
@@ -339,20 +427,95 @@
 			{/if}
 		</div>
 
+		<!-- Issue tabs: assigned (default) / all -->
+		<Tabs.Root value={issueTab} onValueChange={handleIssueTabChange}>
+			<Tabs.List class="w-full justify-start gap-1.5 rounded-none border-none bg-transparent px-6 pt-4 pb-2">
+				<Tabs.Trigger
+					value="assigned"
+					class="flex-none h-auto rounded-full border border-[var(--app-border)] px-2.5 py-1 text-xs text-[var(--color-text-tertiary)] shadow-none data-[state=active]:border-[var(--app-accent)]/30 data-[state=active]:bg-[var(--app-accent)]/10 data-[state=active]:text-[var(--app-accent-light)] data-[state=active]:shadow-none"
+				>
+					<CircleUser size={13} class="mr-1" />
+					{m['my_issues.tab.assigned']()}
+				</Tabs.Trigger>
+				<Tabs.Trigger
+					value="all"
+					class="flex-none h-auto rounded-full border border-[var(--app-border)] px-2.5 py-1 text-xs text-[var(--color-text-tertiary)] shadow-none data-[state=active]:border-[var(--app-accent)]/30 data-[state=active]:bg-[var(--app-accent)]/10 data-[state=active]:text-[var(--app-accent-light)] data-[state=active]:shadow-none"
+				>
+					<Layers size={13} class="mr-1" />
+					{m['my_issues.tab.all']()}
+				</Tabs.Trigger>
+			</Tabs.List>
+		</Tabs.Root>
+
+		<!-- Filter bar -->
+		<FilterBuilder
+			bind:filters
+			projects={filterProjects}
+			{labels}
+			{members}
+			onchange={handleFilterChange}
+		/>
+
 		<!-- Content -->
 		{#if viewMode === 'list'}
 			<div class="flex-1 overflow-y-auto">
 				{#if !issuesState.loading && issuesState.issues.length === 0}
 					<EmptyState
-						title={m['projects.no_issues']()}
-						description={m['projects.no_issues_desc']()}
+						title={issueTab === 'assigned' ? m['my_issues.empty.assigned.title']() : m['projects.no_issues']()}
+						description={issueTab === 'assigned'
+							? m['my_issues.empty.assigned.description']()
+							: m['projects.no_issues_desc']()}
 					/>
+				{:else if issuesState.groupBy}
+					{#each issuesState.groupedIssues as group (group.key)}
+						<section>
+							<IssueGroupHeader
+								groupKey={group.key}
+								groupBy={issuesState.groupBy}
+								groupLabel={group.label}
+								count={group.issues.length}
+								collapsed={collapsedGroups.has(group.key)}
+								ontoggle={() => toggleGroup(group.key)}
+							/>
+							{#if !collapsedGroups.has(group.key)}
+								{#each group.issues as issue (issue.id)}
+									<IssueRow
+										{issue}
+										{slug}
+										{members}
+										{labels}
+										projects={filterProjects}
+										onclick={(i) => { lastSelectedId = i.id; issuesState.select(i); }}
+										{lastSelectedId}
+										onlastselected={(id) => lastSelectedId = id}
+										onaddrelation={handleAddRelation}
+									/>
+								{/each}
+							{/if}
+						</section>
+					{/each}
 				{:else}
 					{#each issuesState.issues as issue (issue.id)}
-						<IssueRow {issue} {slug} {lastSelectedId} onlastselected={(id) => lastSelectedId = id} onclick={(i) => { lastSelectedId = i.id; issuesState.select(i); }} />
+						<IssueRow
+							{issue}
+							{slug}
+							{members}
+							{labels}
+							projects={filterProjects}
+							onclick={(i) => { lastSelectedId = i.id; issuesState.select(i); }}
+							{lastSelectedId}
+							onlastselected={(id) => lastSelectedId = id}
+							onaddrelation={handleAddRelation}
+						/>
 					{/each}
 				{/if}
 				<IssueListLoadMore />
+				<BulkActionBar
+					{slug}
+					{labels}
+					{members}
+					onlabelcreated={(label) => (labels = [label, ...labels.filter((existing) => existing.id !== label.id)])}
+				/>
 			</div>
 		{:else}
 			<div class="flex-1 min-h-0 px-4 py-3">
@@ -386,3 +549,11 @@
 		onclose={() => issuesState.select(null)}
 	/>
 {/if}
+
+<AddRelationDialog
+	bind:open={relationDialogOpen}
+	{slug}
+	identifier={relationIssue?.identifier ?? ''}
+	defaultType={relationDefaultType}
+	oncreated={() => void loadIssues()}
+/>
